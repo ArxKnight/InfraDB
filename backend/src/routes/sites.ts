@@ -60,6 +60,15 @@ function normalizeRamGb(val: unknown): number | null {
   return n;
 }
 
+const SID_HISTORY_NOTE_PREVIEW_MAX = 120;
+
+function buildSidNotePreview(noteText: unknown): string {
+  const condensed = String(noteText ?? '').replace(/\s+/g, ' ').trim();
+  if (condensed === '') return '(empty)';
+  if (condensed.length <= SID_HISTORY_NOTE_PREVIEW_MAX) return condensed;
+  return `${condensed.slice(0, SID_HISTORY_NOTE_PREVIEW_MAX - 1)}…`;
+}
+
 // Validation schemas
 const createSiteSchema = z.object({
   name: z.string().min(1, 'Site name is required').max(100, 'Site name must be less than 100 characters'),
@@ -193,10 +202,31 @@ const getSidsQuerySchema = z
     search: z.string().optional(),
     search_field: z.enum(['any', 'status', 'sid', 'location', 'hostname', 'model']).optional(),
     exact: z.enum(['1', '0', 'true', 'false']).optional(),
+    show_deleted: z.enum(['1', '0', 'true', 'false']).optional(),
     limit: z.coerce.number().min(1).max(1000).default(50).optional(),
     offset: z.coerce.number().min(0).default(0).optional(),
   })
   .passthrough();
+
+function isDeletedSidStatus(status: any): boolean {
+  return String(status ?? '').trim().toLowerCase() === 'deleted';
+}
+
+function sidReadOnlyResponse(res: Response) {
+  return res.status(409).json({
+    success: false,
+    error: 'SID is deleted and read-only',
+  } as ApiResponse);
+}
+
+async function getSidRowForWrite(opts: { adapter: any; siteId: number; sidId: number }) {
+  const { adapter, siteId, sidId } = opts;
+  const rows = await adapter.query(
+    'SELECT id, sid_number, status FROM sids WHERE id = ? AND site_id = ? LIMIT 1',
+    [sidId, siteId]
+  );
+  return (rows?.[0] as any) ?? null;
+}
 
 function parseCommaSeparatedTerms(input: string): string[] {
   const parts = input
@@ -694,14 +724,19 @@ router.get(
         } as ApiResponse);
       }
 
-      const { search, search_field, exact, limit = 50, offset = 0 } = queryValidation.data;
+      const { search, search_field, exact, show_deleted, limit = 50, offset = 0 } = queryValidation.data;
       const isExact = exact === '1' || exact === 'true';
+      const showDeleted = show_deleted === '1' || show_deleted === 'true';
       const safeLimit = Number.isFinite(limit) ? Math.min(1000, Math.max(1, Math.floor(limit))) : 50;
       const safeOffset = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
       const adapter = getAdapter();
 
       const where: string[] = ['s.site_id = ?'];
       const params: any[] = [siteId];
+
+      if (!showDeleted) {
+        where.push(`(LOWER(TRIM(COALESCE(s.status, ''))) <> 'deleted')`);
+      }
 
       if (search && search.trim() !== '') {
         const trimmedSearch = search.trim();
@@ -846,7 +881,7 @@ router.post(
 
       // Ensure default statuses exist (useful for new installs and older sites missing picklists).
       // This keeps SID creation functional and makes "New SID" available for defaulting.
-      const defaultSidStatusNames = ['New SID', 'Active', 'Awaiting Decommision', 'Decommisioned'] as const;
+      const defaultSidStatusNames = ['New SID', 'Active', 'Awaiting Decommision', 'Decommisioned', 'Deleted'] as const;
       for (const statusName of defaultSidStatusNames) {
         await adapter.execute(
           `INSERT INTO sid_statuses (site_id, name, description)
@@ -1404,10 +1439,14 @@ router.post(
         } as any);
       }
 
-      const sidRows = await adapter.query('SELECT id, sid_number FROM sids WHERE id = ? AND site_id = ?', [sidId, siteId]);
+      const sidRows = await adapter.query('SELECT id, sid_number, status FROM sids WHERE id = ? AND site_id = ?', [sidId, siteId]);
       const sidRow = sidRows[0] as any;
       if (!sidRow) {
         return res.status(404).json({ success: false, error: 'SID not found' } as ApiResponse);
+      }
+
+      if (isDeletedSidStatus(sidRow.status)) {
+        return sidReadOnlyResponse(res);
       }
 
       const passwordTypeId = Number(body.password_type_id);
@@ -1443,6 +1482,12 @@ router.post(
       );
 
       try {
+        const passwordChanges: Array<{ field: string; from: string; to: string }> = [
+          { field: 'Password Type', from: '—', to: typeName },
+          { field: `Username (${typeName})`, from: '—', to: username },
+          { field: `Password (${typeName})`, from: 'Empty', to: 'Set' },
+        ];
+
         await logSidActivity({
           actorUserId: req.user!.userId,
           siteId,
@@ -1454,6 +1499,7 @@ router.post(
             password_type_name: typeName,
             username_to: username,
             password_changed: true,
+            changes: passwordChanges,
           },
         });
       } catch {
@@ -1490,10 +1536,14 @@ router.put(
       const body = updateSidPasswordSchema.parse(req.body);
       const adapter = getAdapter();
 
-      const sidRows = await adapter.query('SELECT id, sid_number FROM sids WHERE id = ? AND site_id = ?', [sidId, siteId]);
+      const sidRows = await adapter.query('SELECT id, sid_number, status FROM sids WHERE id = ? AND site_id = ?', [sidId, siteId]);
       const sidRow = sidRows[0] as any;
       if (!sidRow) {
         return res.status(404).json({ success: false, error: 'SID not found' } as ApiResponse);
+      }
+
+      if (isDeletedSidStatus(sidRow.status)) {
+        return sidReadOnlyResponse(res);
       }
 
       const osTypeId = await getDefaultOsPasswordTypeId({ adapter, siteId });
@@ -1543,6 +1593,7 @@ router.put(
               : existingCiphertext;
 
       const passwordChanged = wantsSetPassword || wantsClearPassword;
+      const previousUsername = existing?.username ?? null;
 
       // Legacy endpoint maps to OS Credentials.
       await adapter.execute(
@@ -1557,6 +1608,23 @@ router.put(
       );
 
       try {
+        const passwordChanges: Array<{ field: string; from: string; to: string }> = [];
+        const nextUsernameText = nextUsername ?? null;
+        if ((previousUsername ?? null) !== (nextUsernameText ?? null)) {
+          passwordChanges.push({
+            field: 'Username (OS Credentials)',
+            from: previousUsername == null || String(previousUsername).trim() === '' ? '—' : String(previousUsername),
+            to: nextUsernameText == null || String(nextUsernameText).trim() === '' ? '—' : String(nextUsernameText),
+          });
+        }
+
+        if (passwordChanged) {
+          const hadPassword = existingCiphertext !== null && String(existingCiphertext).trim() !== '';
+          const fromState = hadPassword ? 'Set' : 'Empty';
+          const toState = wantsClearPassword ? 'Empty' : hadPassword ? 'Updated' : 'Set';
+          passwordChanges.push({ field: 'Password (OS Credentials)', from: fromState, to: toState });
+        }
+
         await logSidActivity({
           actorUserId: req.user!.userId,
           siteId,
@@ -1567,6 +1635,7 @@ router.put(
             username_from: existing?.username ?? null,
             username_to: nextUsername ?? null,
             password_changed: passwordChanged,
+            changes: passwordChanges,
           },
         });
       } catch {
@@ -1601,10 +1670,14 @@ router.put(
       const body = updateSidPasswordSchema.parse(req.body);
       const adapter = getAdapter();
 
-      const sidRows = await adapter.query('SELECT id, sid_number FROM sids WHERE id = ? AND site_id = ?', [sidId, siteId]);
+      const sidRows = await adapter.query('SELECT id, sid_number, status FROM sids WHERE id = ? AND site_id = ?', [sidId, siteId]);
       const sidRow = sidRows[0] as any;
       if (!sidRow) {
         return res.status(404).json({ success: false, error: 'SID not found' } as ApiResponse);
+      }
+
+      if (isDeletedSidStatus(sidRow.status)) {
+        return sidReadOnlyResponse(res);
       }
 
       await assertPicklistRowBelongsToSite({ adapter, table: 'sid_password_types', rowId: passwordTypeId, siteId });
@@ -1650,6 +1723,7 @@ router.put(
               : existingCiphertext;
 
       const passwordChanged = wantsSetPassword || wantsClearPassword;
+      const previousUsername = existing?.username ?? null;
 
       await adapter.execute(
         `INSERT INTO sid_passwords (sid_id, password_type_id, username, password_ciphertext, password_updated_by, password_updated_at)
@@ -1663,6 +1737,27 @@ router.put(
       );
 
       try {
+        const passwordChanges: Array<{ field: string; from: string; to: string }> = [];
+        const nextUsernameText = nextUsername ?? null;
+        if ((previousUsername ?? null) !== (nextUsernameText ?? null)) {
+          passwordChanges.push({
+            field: `Username (${typeName})`,
+            from: previousUsername == null || String(previousUsername).trim() === '' ? '—' : String(previousUsername),
+            to: nextUsernameText == null || String(nextUsernameText).trim() === '' ? '—' : String(nextUsernameText),
+          });
+        }
+
+        if (passwordChanged) {
+          const hadPassword = existingCiphertext !== null && String(existingCiphertext).trim() !== '';
+          const fromState = hadPassword ? 'Set' : 'Empty';
+          const toState = wantsClearPassword ? 'Empty' : hadPassword ? 'Updated' : 'Set';
+          passwordChanges.push({ field: `Password (${typeName})`, from: fromState, to: toState });
+        }
+
+        if (!existing) {
+          passwordChanges.unshift({ field: 'Credential', from: 'Missing', to: `Created (${typeName})` });
+        }
+
         await logSidActivity({
           actorUserId: req.user!.userId,
           siteId,
@@ -1675,6 +1770,7 @@ router.put(
             username_from: existing?.username ?? null,
             username_to: nextUsername ?? null,
             password_changed: passwordChanged,
+            changes: passwordChanges,
           },
         });
       } catch {
@@ -1726,6 +1822,10 @@ router.put(
       const existing = existingRows[0] as any;
       if (!existing) {
         return res.status(404).json({ success: false, error: 'SID not found' } as ApiResponse);
+      }
+
+      if (isDeletedSidStatus(existing.status)) {
+        return sidReadOnlyResponse(res);
       }
 
       const fields: string[] = [];
@@ -1927,20 +2027,47 @@ router.delete(
       const { sidId } = sidIdSchema.parse(req.params);
       const adapter = getAdapter();
 
-      const existing = await adapter.query('SELECT id, sid_number FROM sids WHERE id = ? AND site_id = ?', [sidId, siteId]);
-      if (!existing.length) {
+      const existing = await adapter.query('SELECT id, sid_number, status FROM sids WHERE id = ? AND site_id = ? LIMIT 1', [sidId, siteId]);
+      const sidRow = existing[0] as any;
+      if (!sidRow) {
         return res.status(404).json({ success: false, error: 'SID not found' } as ApiResponse);
       }
 
-      await adapter.execute('DELETE FROM sids WHERE id = ? AND site_id = ?', [sidId, siteId]);
+      if (!isDeletedSidStatus(sidRow.status)) {
+        // Ensure the Deleted status exists for this site.
+        await adapter.execute(
+          `INSERT INTO sid_statuses (site_id, name, description)
+           VALUES (?, 'Deleted', NULL)
+           ON DUPLICATE KEY UPDATE name = name`,
+          [siteId]
+        );
+
+        await adapter.execute(
+          "UPDATE sids SET status = 'Deleted', updated_at = CURRENT_TIMESTAMP(3) WHERE id = ? AND site_id = ?",
+          [sidId, siteId]
+        );
+
+        try {
+          await logSidActivity({
+            actorUserId: req.user!.userId,
+            siteId,
+            sidId,
+            action: 'SID_DELETED',
+            summary: `Deleted SID ${sidRow.sid_number}`,
+            diff: { status_to: 'Deleted' },
+          });
+        } catch {
+          // ignore
+        }
+      }
 
       try {
         await logActivity({
           actorUserId: req.user!.userId,
           action: 'SID_DELETED',
-          summary: `Deleted SID ${existing[0].sid_number}`,
+          summary: `Deleted SID ${sidRow.sid_number}`,
           siteId,
-          metadata: { site_id: siteId, sid_id: sidId, sid_number: existing[0].sid_number },
+          metadata: { site_id: siteId, sid_id: sidId, sid_number: sidRow.sid_number },
         });
       } catch (err) {
         console.warn('⚠️ Failed to log SID delete activity:', err);
@@ -1971,9 +2098,14 @@ router.post(
       const body = createSidNoteSchema.parse(req.body);
       const adapter = getAdapter();
 
-      const existing = await adapter.query('SELECT id, sid_number FROM sids WHERE id = ? AND site_id = ?', [sidId, siteId]);
-      if (!existing.length) {
+      const existing = await adapter.query('SELECT id, sid_number, status FROM sids WHERE id = ? AND site_id = ? LIMIT 1', [sidId, siteId]);
+      const sidRow = existing[0] as any;
+      if (!sidRow) {
         return res.status(404).json({ success: false, error: 'SID not found' } as ApiResponse);
+      }
+
+      if (isDeletedSidStatus(sidRow.status)) {
+        return sidReadOnlyResponse(res);
       }
 
       const type = body.type ?? 'NOTE';
@@ -1989,7 +2121,7 @@ router.post(
         await logActivity({
           actorUserId: req.user!.userId,
           action: type === 'CLOSING' ? 'SID_CLOSING_NOTE' : 'SID_NOTE_ADDED',
-          summary: `${type === 'CLOSING' ? 'Added closing note' : 'Added note'} for SID ${existing[0].sid_number}`,
+          summary: `${type === 'CLOSING' ? 'Added closing note' : 'Added note'} for SID ${sidRow.sid_number}`,
           siteId,
           metadata: { site_id: siteId, sid_id: sidId, note_id: noteId, note_type: type },
         });
@@ -1998,13 +2130,22 @@ router.post(
       }
 
       try {
+        const preview = buildSidNotePreview(body.note_text);
+
         await logSidActivity({
           actorUserId: req.user!.userId,
           siteId,
           sidId,
           action: 'SID_NOTE_ADDED',
-          summary: `${type === 'CLOSING' ? 'Added closing note' : 'Added note'} for SID ${existing[0].sid_number}`,
-          diff: { note_id: noteId, note_type: type },
+          summary: `${type === 'CLOSING' ? 'Added closing note' : 'Added note'} for SID ${sidRow.sid_number}`,
+          diff: {
+            note_id: noteId,
+            note_type: type,
+            changes: [
+              { field: 'Note Type', from: '—', to: String(type) },
+              { field: 'Note Preview', from: '—', to: preview },
+            ],
+          },
         });
       } catch {
         // ignore
@@ -2047,7 +2188,7 @@ router.patch(
       const adapter = getAdapter();
 
       const rows = await adapter.query(
-        `SELECT n.id, n.sid_id, n.created_by, n.pinned
+        `SELECT n.id, n.sid_id, n.created_by, n.pinned, s.status as sid_status
          FROM sid_notes n
          JOIN sids s ON s.id = n.sid_id
          WHERE n.id = ? AND n.sid_id = ? AND s.site_id = ?`,
@@ -2057,6 +2198,10 @@ router.patch(
       const note = rows[0] as any;
       if (!note) {
         return res.status(404).json({ success: false, error: 'Note not found' } as ApiResponse);
+      }
+
+      if (isDeletedSidStatus(note.sid_status)) {
+        return sidReadOnlyResponse(res);
       }
 
       const isAdmin = req.siteRole === 'SITE_ADMIN';
@@ -2080,13 +2225,17 @@ router.patch(
         );
 
         try {
+          const pinChanges = [
+            { field: 'Pinned', from: Boolean(note.pinned) ? 'Yes' : 'No', to: 'Yes' },
+          ];
+
           await logSidActivity({
             actorUserId: req.user!.userId,
             siteId,
             sidId,
             action: 'SID_NOTE_PINNED',
             summary: `Pinned a note for SID ${sidId}`,
-            diff: { note_id: noteId },
+            diff: { note_id: noteId, changes: pinChanges },
           });
         } catch {
           // ignore
@@ -2100,13 +2249,17 @@ router.patch(
         );
 
         try {
+          const pinChanges = [
+            { field: 'Pinned', from: Boolean(note.pinned) ? 'Yes' : 'No', to: 'No' },
+          ];
+
           await logSidActivity({
             actorUserId: req.user!.userId,
             siteId,
             sidId,
             action: 'SID_NOTE_UNPINNED',
             summary: `Unpinned a note for SID ${sidId}`,
-            diff: { note_id: noteId },
+            diff: { note_id: noteId, changes: pinChanges },
           });
         } catch {
           // ignore
@@ -2148,10 +2301,45 @@ router.put(
       const { sidId } = sidIdSchema.parse(req.params);
       const body = replaceSidNicsSchema.parse(req.body);
 
-      const existing = await adapter.query('SELECT id FROM sids WHERE id = ? AND site_id = ?', [sidId, siteId]);
-      if (!existing.length) {
+      const sidRow = await getSidRowForWrite({ adapter, siteId, sidId });
+      if (!sidRow) {
         return res.status(404).json({ success: false, error: 'SID not found' } as ApiResponse);
       }
+
+      if (isDeletedSidStatus(sidRow.status)) {
+        return sidReadOnlyResponse(res);
+      }
+
+      const previousNics = await adapter.query(
+        `SELECT
+          n.id,
+          n.sid_id,
+          n.card_name,
+          n.name,
+          n.mac_address,
+          n.ip_address,
+          n.site_vlan_id,
+          v.vlan_id as vlan_id,
+          v.name as vlan_name,
+          n.nic_type_id,
+          nt.name as nic_type_name,
+          n.nic_speed_id,
+          ns.name as nic_speed_name,
+          c.switch_sid_id,
+          sw.sid_number as switch_sid_number,
+          sw.hostname as switch_hostname,
+          sw.switch_port_count as switch_port_count,
+          c.switch_port
+        FROM sid_nics n
+        LEFT JOIN site_vlans v ON v.id = n.site_vlan_id
+        LEFT JOIN sid_nic_types nt ON nt.id = n.nic_type_id
+        LEFT JOIN sid_nic_speeds ns ON ns.id = n.nic_speed_id
+        LEFT JOIN sid_connections c ON c.nic_id = n.id
+        LEFT JOIN sids sw ON sw.id = c.switch_sid_id
+        WHERE n.sid_id = ?
+        ORDER BY COALESCE(n.card_name, ''), n.name ASC`,
+        [sidId]
+      );
 
       // Validate referenced switch SIDs belong to the same site
       const switchIds = Array.from(
@@ -2262,6 +2450,90 @@ router.put(
         [sidId]
       );
 
+      const normalizeNicValue = (value: any): string => {
+        if (value === null || value === undefined) return '—';
+        const text = String(value).trim();
+        return text === '' ? '—' : text;
+      };
+
+      const nicCardDisplay = (value: any): string => {
+        const text = String(value ?? '').trim();
+        return text === '' ? 'On-Board Network Card' : text;
+      };
+
+      const toNicModel = (row: any) => ({
+        card: nicCardDisplay(row?.card_name),
+        name: normalizeNicValue(row?.name),
+        mac: normalizeNicValue(row?.mac_address),
+        ip: normalizeNicValue(row?.ip_address),
+        vlan: row?.vlan_id === null || row?.vlan_id === undefined ? '—' : String(row.vlan_id),
+        nicType: normalizeNicValue(row?.nic_type_name),
+        nicSpeed: normalizeNicValue(row?.nic_speed_name),
+        switchSid: normalizeNicValue(row?.switch_sid_number),
+        switchPort: normalizeNicValue(row?.switch_port),
+      });
+
+      const keyWithOrdinal = (rows: any[]) => {
+        const keyCounts = new Map<string, number>();
+        return (rows ?? []).map((row) => {
+          const nic = toNicModel(row);
+          const base = `${nic.card}::${nic.name}`;
+          const count = (keyCounts.get(base) ?? 0) + 1;
+          keyCounts.set(base, count);
+          const key = `${base}#${count}`;
+          return { key, nic };
+        });
+      };
+
+      const previousKeyed = keyWithOrdinal(previousNics as any[]);
+      const nextKeyed = keyWithOrdinal(nics as any[]);
+      const previousMap = new Map(previousKeyed.map((x) => [x.key, x.nic]));
+      const nextMap = new Map(nextKeyed.map((x) => [x.key, x.nic]));
+
+      const allKeys = Array.from(new Set([...previousMap.keys(), ...nextMap.keys()])).sort((a, b) => a.localeCompare(b));
+
+      const nicChanges: Array<{ field: string; from: string; to: string }> = [];
+      for (const key of allKeys) {
+        const before = previousMap.get(key);
+        const after = nextMap.get(key);
+
+        const keyParts = key.split('#');
+        const labelBase = keyParts.length > 0 && keyParts[0] ? keyParts[0] : key;
+        const label = labelBase.replace('::', ' / ');
+
+        if (!before && after) {
+          nicChanges.push({ field: `NIC ${label}`, from: '—', to: 'Added' });
+          continue;
+        }
+
+        if (before && !after) {
+          nicChanges.push({ field: `NIC ${label}`, from: 'Present', to: 'Removed' });
+          continue;
+        }
+
+        if (!before || !after) continue;
+
+        const compare: Array<{ prop: keyof typeof before; title: string }> = [
+          { prop: 'mac', title: 'MAC' },
+          { prop: 'ip', title: 'IP' },
+          { prop: 'vlan', title: 'VLAN' },
+          { prop: 'nicType', title: 'NIC Type' },
+          { prop: 'nicSpeed', title: 'NIC Speed' },
+          { prop: 'switchSid', title: 'Switch SID' },
+          { prop: 'switchPort', title: 'Switch Port' },
+        ];
+
+        for (const item of compare) {
+          if (before[item.prop] !== after[item.prop]) {
+            nicChanges.push({
+              field: `NIC ${label} ${item.title}`,
+              from: before[item.prop],
+              to: after[item.prop],
+            });
+          }
+        }
+      }
+
       try {
         await logSidActivity({
           actorUserId: req.user!.userId,
@@ -2269,7 +2541,10 @@ router.put(
           sidId,
           action: 'SID_NICS_REPLACED',
           summary: `Replaced NIC list for SID ${sidId}`,
-          diff: { nic_count: Array.isArray(body.nics) ? body.nics.length : 0 },
+          diff: {
+            nic_count: Array.isArray(body.nics) ? body.nics.length : 0,
+            changes: nicChanges,
+          },
         });
       } catch {
         // ignore
@@ -2344,9 +2619,26 @@ router.put(
       const { sidId } = sidIdSchema.parse(req.params);
       const body = replaceSidIpAddressesSchema.parse(req.body);
 
-      const existing = await adapter.query('SELECT id FROM sids WHERE id = ? AND site_id = ?', [sidId, siteId]);
-      if (!existing.length) {
+      const sidRow = await getSidRowForWrite({ adapter, siteId, sidId });
+      if (!sidRow) {
         return res.status(404).json({ success: false, error: 'SID not found' } as ApiResponse);
+      }
+
+      if (isDeletedSidStatus(sidRow.status)) {
+        return sidReadOnlyResponse(res);
+      }
+
+      let existingIps: string[] = [];
+      try {
+        const existingRows = await adapter.query(
+          'SELECT ip_address FROM sid_ip_addresses WHERE sid_id = ? ORDER BY ip_address ASC',
+          [sidId]
+        );
+        existingIps = (existingRows ?? [])
+          .map((r: any) => String(r?.ip_address ?? '').trim())
+          .filter((ip: string) => ip !== '');
+      } catch (error) {
+        if (!isNoSuchTableError(error)) throw error;
       }
 
       const cleaned = Array.from(
@@ -2379,13 +2671,22 @@ router.put(
       }
 
       try {
+        const beforeSet = new Set(existingIps);
+        const afterSet = new Set(cleaned);
+        const removedIps = existingIps.filter((ip) => !afterSet.has(ip));
+        const addedIps = cleaned.filter((ip) => !beforeSet.has(ip));
+        const ipChanges: Array<{ field: string; from: string; to: string }> = [
+          ...removedIps.map((ip) => ({ field: 'IP Address', from: ip, to: 'Removed' })),
+          ...addedIps.map((ip) => ({ field: 'IP Address', from: '—', to: ip })),
+        ];
+
         await logSidActivity({
           actorUserId: req.user!.userId,
           siteId,
           sidId,
           action: 'SID_IPS_REPLACED',
           summary: `Replaced IP addresses for SID ${sidId}`,
-          diff: { ip_count: cleaned.length },
+          diff: { ip_count: cleaned.length, changes: ipChanges },
         });
       } catch {
         // ignore

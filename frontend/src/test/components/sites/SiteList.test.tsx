@@ -14,6 +14,7 @@ const mockSites = [
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
     label_count: 5,
+    sid_count: 3,
   },
   {
     id: 2,
@@ -24,6 +25,7 @@ const mockSites = [
     created_at: '2024-01-02T00:00:00Z',
     updated_at: '2024-01-02T00:00:00Z',
     label_count: 0,
+    sid_count: 0,
   },
 ];
 
@@ -66,6 +68,8 @@ describe('SiteList', () => {
 
     expect(screen.getByText('5 labels')).toBeInTheDocument();
     expect(screen.getByText('0 labels')).toBeInTheDocument();
+    expect(screen.getByText('3 SIDs')).toBeInTheDocument();
+    expect(screen.getByText('0 SIDs')).toBeInTheDocument();
   });
 
   it('should handle search functionality', async () => {

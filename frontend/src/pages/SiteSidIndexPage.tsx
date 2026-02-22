@@ -46,6 +46,7 @@ const SiteSidIndexPage: React.FC = () => {
   const [search, setSearch] = React.useState('');
   const [searchField, setSearchField] = React.useState<'status' | 'sid' | 'location' | 'hostname' | 'model'>('sid');
   const [matchExact, setMatchExact] = React.useState(false);
+  const [showDeleted, setShowDeleted] = React.useState(false);
   const [sids, setSids] = React.useState<any[]>([]);
   const [sidsLoading, setSidsLoading] = React.useState(false);
   const [sidsError, setSidsError] = React.useState<string | null>(null);
@@ -88,6 +89,7 @@ const SiteSidIndexPage: React.FC = () => {
             search: search.trim() || undefined,
             search_field: searchField,
             exact: matchExact,
+            show_deleted: showDeleted,
             limit: 200,
             offset: 0,
           });
@@ -104,7 +106,7 @@ const SiteSidIndexPage: React.FC = () => {
     }, 250);
 
     return () => clearTimeout(timeout);
-  }, [siteId, search, searchField, matchExact]);
+  }, [siteId, search, searchField, matchExact, showDeleted]);
 
   const formatRackEntry = (sid: any): string => {
     const raw = sid?.rack_u;
@@ -187,7 +189,11 @@ const SiteSidIndexPage: React.FC = () => {
         {canCreateSid && (
           <div className="flex items-center gap-2">
             {canEdit && (
-              <Button variant="outline" onClick={() => navigate(`/sites/${siteId}/sid/admin`)}>
+              <Button
+                variant="outline"
+                className="border-orange-500 text-orange-600 hover:bg-orange-50 hover:text-orange-700"
+                onClick={() => navigate(`/sites/${siteId}/sid/admin`)}
+              >
                 SID Admin
               </Button>
             )}
@@ -243,6 +249,15 @@ const SiteSidIndexPage: React.FC = () => {
                   checked={matchExact}
                   onCheckedChange={(v) => setMatchExact(Boolean(v))}
                   aria-label="Match exact"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pl-2">
+                <div className="text-sm text-muted-foreground">Show Deleted</div>
+                <Switch
+                  checked={showDeleted}
+                  onCheckedChange={(v) => setShowDeleted(Boolean(v))}
+                  aria-label="Show deleted"
                 />
               </div>
             </div>

@@ -81,7 +81,7 @@ describe('Site Routes', () => {
       expect(response.body.data.pagination.total).toBe(2);
     });
 
-    it('should get sites with label counts', async () => {
+    it('should get sites with label and sid counts', async () => {
       const site = await siteModel.create({
         name: 'Test Site',
         code: 'TS',
@@ -114,6 +114,12 @@ describe('Site Routes', () => {
         notes: 'Test label',
       });
 
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, status)
+         VALUES (?, ?, ?)`
+        , [site.id, '1', 'Active']
+      );
+
       const response = await request(app)
         .get('/api/sites?include_counts=true')
         .set('Authorization', `Bearer ${authToken}`)
@@ -122,6 +128,7 @@ describe('Site Routes', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.data.sites).toHaveLength(1);
       expect(response.body.data.sites[0].label_count).toBe(1);
+      expect(Number(response.body.data.sites[0].sid_count)).toBe(1);
     });
 
     it('should filter sites by search term', async () => {

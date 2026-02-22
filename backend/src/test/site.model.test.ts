@@ -145,10 +145,17 @@ describe('Site Model', () => {
         , [createdSite.id, 2, 'CS-0002', 'cable', testUserId]
       );
 
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, status)
+         VALUES (?, ?, ?)`
+        , [createdSite.id, '1', 'Active']
+      );
+
       const siteWithCount = await siteModel.findByIdWithLabelCount(createdSite.id, testUserId);
       expect(siteWithCount).toBeDefined();
       expect(siteWithCount!.id).toBe(createdSite.id);
       expect(Number(siteWithCount!.label_count)).toBe(2);
+      expect(Number(siteWithCount!.sid_count)).toBe(1);
       expect(siteWithCount!.site_role).toBe('SITE_ADMIN');
     });
 
@@ -162,15 +169,23 @@ describe('Site Model', () => {
         , [siteA.id, 1, 'SA-0001', 'cable', testUserId]
       );
 
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, status)
+         VALUES (?, ?, ?)`
+        , [siteA.id, '1', 'Active']
+      );
+
       const sites = await siteModel.findByUserIdWithLabelCounts(testUserId, { limit: 50, offset: 0 });
       const byId = new Map(sites.map(s => [s.id, s]));
 
       expect(byId.get(siteA.id)).toBeDefined();
       expect(Number(byId.get(siteA.id)!.label_count)).toBe(1);
+      expect(Number(byId.get(siteA.id)!.sid_count)).toBe(1);
       expect(byId.get(siteA.id)!.site_role).toBe('SITE_ADMIN');
 
       expect(byId.get(siteB.id)).toBeDefined();
       expect(Number(byId.get(siteB.id)!.label_count)).toBe(0);
+      expect(Number(byId.get(siteB.id)!.sid_count)).toBe(0);
       expect(byId.get(siteB.id)!.site_role).toBe('SITE_ADMIN');
     });
   });

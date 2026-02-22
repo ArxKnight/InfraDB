@@ -21,6 +21,7 @@ import {
 
 interface SiteWithLabelCount extends Site {
   label_count: number;
+  sid_count?: number;
 }
 
 interface SiteListProps {
@@ -257,6 +258,7 @@ const SiteList: React.FC<SiteListProps> = ({
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {sites.map((site) => (
+            
             <Card
               key={site.id}
               className={'cursor-pointer hover:shadow-md transition-shadow'}
@@ -281,6 +283,7 @@ const SiteList: React.FC<SiteListProps> = ({
                 )}
                 <div className="flex flex-col items-center gap-1 text-sm text-muted-foreground">
                   <span>{site.label_count} labels</span>
+                  <span>{Number(site.sid_count ?? 0)} SID{Number(site.sid_count ?? 0) === 1 ? '' : 's'}</span>
                   <span>Created {formatDate(site.created_at)}</span>
                 </div>
               </CardContent>

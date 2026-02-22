@@ -382,6 +382,7 @@ class ApiClient {
       search?: string;
       search_field?: 'any' | 'status' | 'sid' | 'location' | 'hostname' | 'model';
       exact?: boolean;
+      show_deleted?: boolean;
       limit?: number;
       offset?: number;
     }
@@ -390,6 +391,7 @@ class ApiClient {
     if (params?.search) searchParams.append('search', params.search);
     if (params?.search_field) searchParams.append('search_field', params.search_field);
     if (params?.exact) searchParams.append('exact', '1');
+    if (params?.show_deleted) searchParams.append('show_deleted', '1');
     if (params?.limit) searchParams.append('limit', params.limit.toString());
     if (params?.offset) searchParams.append('offset', params.offset.toString());
     const query = searchParams.toString();

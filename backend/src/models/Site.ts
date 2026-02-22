@@ -5,9 +5,10 @@ import { Site, SiteRole } from '../types/index.js';
 export type SiteWithRole = Site & { site_role: SiteRole };
 export type SiteWithLabelCountAndRole = Site & {
   label_count: number;
+  sid_count: number;
   site_role: SiteRole | null;
 };
-export type SiteWithLabelCountsAndRole = Site & { label_count: number; site_role: SiteRole };
+export type SiteWithLabelCountsAndRole = Site & { label_count: number; sid_count: number; site_role: SiteRole };
 
 export interface CreateSiteData {
   name: string;
@@ -178,7 +179,7 @@ export class SiteModel {
     search?: string;
     limit?: number;
     offset?: number;
-  } = {}): Promise<(Site & { label_count: number })[]> {
+  } = {}): Promise<(Site & { label_count: number; sid_count: number })[]> {
     const { search, limit = 50, offset = 0 } = options;
     const safeLimit = parseInt(String(limit), 10) || 50;
     const safeOffset = parseInt(String(offset), 10) || 0;
@@ -188,9 +189,19 @@ export class SiteModel {
     let query = `
       SELECT 
         s.id, s.name, s.code, s.created_by, s.location, s.description, s.is_active, s.created_at, s.updated_at,
-        COUNT(l.id) as label_count
+        COALESCE(lc.label_count, 0) as label_count,
+        COALESCE(sc.sid_count, 0) as sid_count
       FROM sites s
-      LEFT JOIN labels l ON s.id = l.site_id
+      LEFT JOIN (
+        SELECT site_id, COUNT(*) as label_count
+        FROM labels
+        GROUP BY site_id
+      ) lc ON lc.site_id = s.id
+      LEFT JOIN (
+        SELECT site_id, COUNT(*) as sid_count
+        FROM sids
+        GROUP BY site_id
+      ) sc ON sc.site_id = s.id
       WHERE s.is_active = 1
     `;
 
@@ -202,10 +213,10 @@ export class SiteModel {
       params.push(searchPattern, searchPattern, searchPattern, searchPattern);
     }
 
-    query += ` GROUP BY s.id ORDER BY s.name ASC LIMIT ${finalLimit} OFFSET ${finalOffset}`;
+    query += ` ORDER BY s.name ASC LIMIT ${finalLimit} OFFSET ${finalOffset}`;
 
     const rows = await this.adapter.query(query, params);
-    return rows as (Site & { label_count: number })[];
+    return rows as (Site & { label_count: number; sid_count: number })[];
   }
 
   /**
@@ -350,6 +361,7 @@ export class SiteModel {
       `SELECT 
         s.id, s.name, s.code, s.created_by, s.location, s.description, s.is_active, s.created_at, s.updated_at,
         COALESCE(lc.label_count, 0) as label_count,
+        COALESCE(sc.sid_count, 0) as sid_count,
         sm.site_role as site_role
       FROM sites s
       LEFT JOIN site_memberships sm ON sm.site_id = s.id AND sm.user_id = ?
@@ -358,6 +370,11 @@ export class SiteModel {
         FROM labels
         GROUP BY site_id
       ) lc ON lc.site_id = s.id
+      LEFT JOIN (
+        SELECT site_id, COUNT(*) as sid_count
+        FROM sids
+        GROUP BY site_id
+      ) sc ON sc.site_id = s.id
       WHERE s.id = ? AND s.is_active = 1
       `,
       [userId, id]
@@ -386,6 +403,7 @@ export class SiteModel {
       SELECT 
         s.id, s.name, s.code, s.created_by, s.location, s.description, s.is_active, s.created_at, s.updated_at,
         COALESCE(lc.label_count, 0) as label_count,
+        COALESCE(sc.sid_count, 0) as sid_count,
         sm.site_role as site_role
       FROM sites s
       JOIN site_memberships sm ON sm.site_id = s.id
@@ -394,6 +412,11 @@ export class SiteModel {
         FROM labels
         GROUP BY site_id
       ) lc ON lc.site_id = s.id
+      LEFT JOIN (
+        SELECT site_id, COUNT(*) as sid_count
+        FROM sids
+        GROUP BY site_id
+      ) sc ON sc.site_id = s.id
       WHERE sm.user_id = ? AND s.is_active = 1
     `;
     

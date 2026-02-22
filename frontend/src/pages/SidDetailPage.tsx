@@ -132,6 +132,55 @@ function formatNoteHeader(createdAt: any, username: any): string {
   return `${dateStr} - ${timeStr}${u ? ` - ${u}` : ''}`;
 }
 
+function formatHistoryFieldLabel(field: unknown): string {
+  const raw = String(field ?? '').trim();
+  if (!raw) return 'Field';
+
+  const mappedLabels: Record<string, string> = {
+    sid_number: 'SID Number',
+    sid_type_id: 'SID Type',
+    device_model_id: 'Device Model',
+    cpu_model_id: 'CPU Model',
+    platform_id: 'Platform',
+    location_id: 'Location',
+    rack_u: 'Rack U',
+    ram_gb: 'RAM (GB)',
+    cpu_count: 'CPU Count',
+    cpu_cores: 'CPU Cores',
+    cpu_threads: 'CPU Threads',
+    serial_number: 'Serial Number',
+    hostname: 'Hostname',
+    status: 'Status',
+    os_name: 'OS Name',
+    os_version: 'OS Version',
+    mgmt_ip: 'Mgmt IP',
+    mgmt_mac: 'Mgmt MAC',
+    primary_ip: 'Primary IP',
+    subnet_ip: 'Subnet IP',
+    gateway_ip: 'Gateway IP',
+    switch_port_count: 'Switch Port Count',
+    pdu_power: 'PDU Power',
+    note_type: 'Note Type',
+    note_preview: 'Note Preview',
+    password_type_name: 'Password Type',
+    username_from: 'Username',
+    username_to: 'Username',
+    password_changed: 'Password',
+  };
+
+  const mapped = mappedLabels[raw.toLowerCase()];
+  if (mapped) return mapped;
+
+  const withSpaces = raw.replace(/_/g, ' ');
+  const acronyms = new Set(['id', 'ip', 'mac', 'cpu', 'os', 'sid', 'vlan', 'nic', 'pdu']);
+
+  return withSpaces.replace(/\b[a-z][a-z0-9]*\b/gi, (word) => {
+    const lower = word.toLowerCase();
+    if (acronyms.has(lower)) return lower.toUpperCase();
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+  });
+}
+
 const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
   const navigate = useNavigate();
   const params = useParams();
@@ -146,7 +195,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
     user &&
       (user.role === 'GLOBAL_ADMIN' || (memberships ?? []).some((m) => Number(m.site_id) === siteId))
   );
-  const canModify = isCreate ? canCreateSid : canEdit;
+  const canModifyBase = isCreate ? canCreateSid : canEdit;
 
   const [siteName, setSiteName] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -155,6 +204,10 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
   const [sid, setSid] = React.useState<SidRecord | null>(null);
   const [notes, setNotes] = React.useState<any[]>([]);
   const [nics, setNics] = React.useState<any[]>([]);
+
+  const isReadOnly = !isCreate && String((sid as any)?.status ?? '').trim().toLowerCase() === 'deleted';
+  const canModify = canModifyBase && !isReadOnly;
+  const canEditWrite = canEdit && !isReadOnly;
 
   const [sidTypes, setSidTypes] = React.useState<any[]>([]);
   const [deviceModels, setDeviceModels] = React.useState<any[]>([]);
@@ -180,6 +233,9 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
   const [pendingNetworkingRemoval, setPendingNetworkingRemoval] = React.useState<PendingNetworkingRemoval>(null);
   const [saveLoading, setSaveLoading] = React.useState(false);
   const [saveError, setSaveError] = React.useState<string | null>(null);
+
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleteLoading, setDeleteLoading] = React.useState(false);
 
   const shouldLogViewRef = React.useRef<boolean>(!isCreate);
 
@@ -617,6 +673,10 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
 
   const saveLegacyPassword = async () => {
     if (isCreate) return;
+    if (isReadOnly) {
+      setPasswordError('SID is deleted and read-only');
+      return;
+    }
     if (!canEdit) {
       setPasswordError('Site admin access required');
       return;
@@ -651,6 +711,10 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
 
   const addTypedPassword = async () => {
     if (isCreate) return;
+    if (isReadOnly) {
+      setPasswordError('SID is deleted and read-only');
+      return;
+    }
     if (!canEdit) {
       setPasswordError('Site admin access required');
       return;
@@ -710,6 +774,10 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
 
   const saveEditedTypedPassword = async () => {
     if (isCreate) return;
+    if (isReadOnly) {
+      setPasswordError('SID is deleted and read-only');
+      return;
+    }
     if (!canEdit) {
       setPasswordError('Site admin access required');
       return;
@@ -750,6 +818,10 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
 
   const saveSid = async () => {
     if (!sid) return;
+    if (!isCreate && isReadOnly) {
+      setSaveError('SID is deleted and read-only');
+      return;
+    }
     try {
       setSaveLoading(true);
       setSaveError(null);
@@ -887,6 +959,33 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
       setSaveError(e instanceof Error ? e.message : 'Failed to save');
     } finally {
       setSaveLoading(false);
+    }
+  };
+
+  const deleteSid = async () => {
+    if (isCreate) return;
+    if (!canEdit) {
+      toast.error('Site admin access required');
+      return;
+    }
+    if (isReadOnly) {
+      toast.error('SID is already deleted');
+      return;
+    }
+
+    try {
+      setDeleteLoading(true);
+      const resp = await apiClient.deleteSiteSid(siteId, sidId);
+      if (!resp.success) throw new Error(resp.error || 'Failed to delete SID');
+
+      toast.success('SID deleted');
+      shouldLogViewRef.current = false;
+      await reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to delete SID');
+    } finally {
+      setDeleteLoading(false);
+      setDeleteOpen(false);
     }
   };
 
@@ -1114,26 +1213,38 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
           </div>
         </div>
 
-        <Button
-          onClick={saveSid}
-          disabled={
-            (isCreate
-              ? !canModify || saveLoading || !createPrereqsReady || String(sid?.status ?? '').trim() === ''
-              : !canModify || saveLoading)
-          }
-        >
-          {saveLoading ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Saving…
-            </>
-          ) : (
-            <>
-              <Save className="mr-2 h-4 w-4" />
-              {isCreate ? 'Create SID' : 'Save Edits'}
-            </>
+        <div className="flex items-center gap-2">
+          {!isCreate && canEdit && !isReadOnly && (
+            <Button
+              variant="destructive"
+              onClick={() => setDeleteOpen(true)}
+              disabled={saveLoading || deleteLoading}
+            >
+              Delete SID
+            </Button>
           )}
-        </Button>
+
+          <Button
+            onClick={saveSid}
+            disabled={
+              (isCreate
+                ? !canModify || saveLoading || !createPrereqsReady || String(sid?.status ?? '').trim() === ''
+                : !canModify || saveLoading)
+            }
+          >
+            {saveLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Saving…
+              </>
+            ) : (
+              <>
+                <Save className="mr-2 h-4 w-4" />
+                {isCreate ? 'Create SID' : 'Save Edits'}
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       {saveError && (
@@ -1300,11 +1411,11 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                         <Textarea
                           value={newNote}
                           onChange={(e) => setNewNote(e.target.value)}
-                          disabled={noteLoading || isCreate}
+                          disabled={noteLoading || isCreate || isReadOnly}
                           placeholder="Write a note for the SID…"
                         />
                         <div className="flex justify-end">
-                          <Button onClick={addNote} disabled={noteLoading || isCreate || newNote.trim() === ''}>
+                          <Button onClick={addNote} disabled={noteLoading || isCreate || isReadOnly || newNote.trim() === ''}>
                             {noteLoading ? (
                               <>
                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1348,7 +1459,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                                           variant="ghost"
                                           size="icon"
                                           onClick={() => setNotePinned(n.id, false)}
-                                          disabled={pinLoadingId === n.id}
+                                          disabled={pinLoadingId === n.id || isReadOnly}
                                           title="Unpin"
                                         >
                                           <PinOff className="h-4 w-4" />
@@ -1363,7 +1474,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                                         variant="ghost"
                                         size="icon"
                                         onClick={() => setNotePinned(n.id, true)}
-                                        disabled={pinLoadingId === n.id}
+                                        disabled={pinLoadingId === n.id || isReadOnly}
                                         title="Pin"
                                       >
                                         <Pin className="h-4 w-4" />
@@ -1449,7 +1560,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                               <Label>Username</Label>
                               <Input
                                 value={passwordUsername}
-                                disabled={!canEdit || passwordLoading || passwordSaving}
+                                disabled={!canEditWrite || passwordLoading || passwordSaving}
                                 onChange={(e) => setPasswordUsername(e.target.value)}
                                 placeholder="e.g. Administrator"
                               />
@@ -1459,7 +1570,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                               <Input
                                 type="password"
                                 value={passwordValue}
-                                disabled={!canEdit || passwordLoading || passwordSaving}
+                                disabled={!canEditWrite || passwordLoading || passwordSaving}
                                 onChange={(e) => setPasswordValue(e.target.value)}
                                 placeholder="Enter to overwrite"
                               />
@@ -1467,7 +1578,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                           </div>
 
                           <div className="flex justify-end">
-                            <Button onClick={saveLegacyPassword} disabled={!canEdit || passwordLoading || passwordSaving}>
+                            <Button onClick={saveLegacyPassword} disabled={!canEditWrite || passwordLoading || passwordSaving}>
                               {passwordSaving ? (
                                 <>
                                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1492,7 +1603,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                                 setCreatePasswordValue('');
                                 setCreatePasswordOpen(true);
                               }}
-                              disabled={!canEdit || passwordLoading || passwordSaving || unusedPasswordTypes.length === 0}
+                              disabled={!canEditWrite || passwordLoading || passwordSaving || unusedPasswordTypes.length === 0}
                             >
                               Add Password
                             </Button>
@@ -1528,7 +1639,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                                           variant="ghost"
                                           size="icon"
                                           onClick={() => openEditPasswordDialog(row)}
-                                          disabled={!canEdit || passwordLoading || passwordSaving}
+                                          disabled={!canEditWrite || passwordLoading || passwordSaving}
                                           title="Edit"
                                         >
                                           <Pencil className="h-4 w-4" />
@@ -1556,7 +1667,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                                   <Select
                                     value={createPasswordTypeId}
                                     onValueChange={(v) => setCreatePasswordTypeId(v)}
-                                    disabled={!canEdit || passwordLoading || passwordSaving}
+                                    disabled={!canEditWrite || passwordLoading || passwordSaving}
                                   >
                                     <SelectTrigger>
                                       <SelectValue placeholder="Select password type" />
@@ -1575,7 +1686,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                                   <Label>Username</Label>
                                   <Input
                                     value={createPasswordUsername}
-                                    disabled={!canEdit || passwordLoading || passwordSaving}
+                                    disabled={!canEditWrite || passwordLoading || passwordSaving}
                                     onChange={(e) => setCreatePasswordUsername(e.target.value)}
                                     placeholder="e.g. Administrator"
                                   />
@@ -1586,7 +1697,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                                   <Input
                                     type="password"
                                     value={createPasswordValue}
-                                    disabled={!canEdit || passwordLoading || passwordSaving}
+                                    disabled={!canEditWrite || passwordLoading || passwordSaving}
                                     onChange={(e) => setCreatePasswordValue(e.target.value)}
                                     placeholder="Enter password"
                                   />
@@ -1629,7 +1740,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                                   <Label>Username</Label>
                                   <Input
                                     value={editPasswordUsername}
-                                    disabled={!canEdit || passwordLoading || passwordSaving}
+                                    disabled={!canEditWrite || passwordLoading || passwordSaving}
                                     onChange={(e) => setEditPasswordUsername(e.target.value)}
                                     placeholder="e.g. Administrator"
                                   />
@@ -1640,7 +1751,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                                   <Input
                                     type="password"
                                     value={editPasswordValue}
-                                    disabled={!canEdit || passwordLoading || passwordSaving}
+                                    disabled={!canEditWrite || passwordLoading || passwordSaving}
                                     onChange={(e) => setEditPasswordValue(e.target.value)}
                                     placeholder="Leave blank to keep current"
                                   />
@@ -1724,7 +1835,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                                   <div className="mt-2 space-y-1 text-sm text-muted-foreground">
                                     {renderedChanges.map((c: any, idx: number) => (
                                       <div key={`${h.id}-${idx}`}>
-                                        {c.field}: {String(c.from ?? '')} → {String(c.to ?? '')}
+                                        {formatHistoryFieldLabel(c.field)}: {String(c.from ?? '')} → {String(c.to ?? '')}
                                       </div>
                                     ))}
                                   </div>
@@ -2410,6 +2521,34 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          if (!open) setDeleteOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm deletion</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete this SID? It will not be removed; its status will be set to "Deleted" and it will become read-only.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteLoading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void deleteSid();
+              }}
+              disabled={deleteLoading}
+            >
+              {deleteLoading ? 'Deleting…' : 'Delete SID'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={pendingNetworkingRemoval !== null}
