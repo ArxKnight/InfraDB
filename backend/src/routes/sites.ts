@@ -1334,7 +1334,7 @@ router.get(
 
 /**
  * GET /api/sites/:id/sids/:sidId/history
- * Get SID Update History (view + changes)
+ * Get SID Update History (meaningful field changes)
  */
 router.get(
   '/:id/sids/:sidId/history',
@@ -1371,7 +1371,31 @@ router.get(
         [siteId, sidId]
       );
 
-      return res.json({ success: true, data: { history: rows } } as ApiResponse);
+      const excludedActions = new Set(['SID_VIEWED', 'SID_NOTE_ADDED', 'SID_NOTE_PINNED', 'SID_NOTE_UNPINNED', 'SID_CLOSING_NOTE']);
+      const keepWithoutChanges = new Set(['SID_CREATED', 'SID_DELETED']);
+
+      const getChangesFromDiff = (diffJson: any): any[] => {
+        if (!diffJson) return [];
+        try {
+          const parsed = typeof diffJson === 'string' ? JSON.parse(diffJson) : diffJson;
+          if (Array.isArray(parsed?.changes)) return parsed.changes;
+          if (Array.isArray(parsed?.changes?.changes)) return parsed.changes.changes;
+          return [];
+        } catch {
+          return [];
+        }
+      };
+
+      const history = (rows as any[]).filter((row) => {
+        const action = String(row?.action ?? '');
+        if (excludedActions.has(action)) return false;
+        if (keepWithoutChanges.has(action)) return true;
+
+        const changes = getChangesFromDiff(row?.diff_json);
+        return Array.isArray(changes) && changes.some((change) => change && typeof change.field === 'string');
+      });
+
+      return res.json({ success: true, data: { history } } as ApiResponse);
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ success: false, error: 'Validation failed', details: error.errors } as ApiResponse);
@@ -1755,19 +1779,21 @@ router.put(
           passwordChanges.push({ field: 'Password (OS Credentials)', from: fromState, to: toState });
         }
 
-        await logSidActivity({
-          actorUserId: req.user!.userId,
-          siteId,
-          sidId,
-          action: 'SID_PASSWORD_UPDATED',
-          summary: `Updated OS login details for SID ${sidRow.sid_number}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`,
-          diff: {
-            username_from: existing?.username ?? null,
-            username_to: nextUsername ?? null,
-            password_changed: passwordChanged,
-            changes: passwordChanges,
-          },
-        });
+        if (passwordChanges.length > 0) {
+          await logSidActivity({
+            actorUserId: req.user!.userId,
+            siteId,
+            sidId,
+            action: 'SID_PASSWORD_UPDATED',
+            summary: `Updated OS login details for SID ${sidRow.sid_number}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`,
+            diff: {
+              username_from: existing?.username ?? null,
+              username_to: nextUsername ?? null,
+              password_changed: passwordChanged,
+              changes: passwordChanges,
+            },
+          });
+        }
       } catch {
         // ignore
       }
@@ -1888,21 +1914,23 @@ router.put(
           passwordChanges.unshift({ field: 'Credential', from: 'Missing', to: `Created (${typeName})` });
         }
 
-        await logSidActivity({
-          actorUserId: req.user!.userId,
-          siteId,
-          sidId,
-          action: 'SID_PASSWORD_UPDATED',
-          summary: `Updated ${typeName} for SID ${sidRow.sid_number}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`,
-          diff: {
-            password_type_id: passwordTypeId,
-            password_type_name: typeName,
-            username_from: existing?.username ?? null,
-            username_to: nextUsername ?? null,
-            password_changed: passwordChanged,
-            changes: passwordChanges,
-          },
-        });
+        if (passwordChanges.length > 0) {
+          await logSidActivity({
+            actorUserId: req.user!.userId,
+            siteId,
+            sidId,
+            action: 'SID_PASSWORD_UPDATED',
+            summary: `Updated ${typeName} for SID ${sidRow.sid_number}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`,
+            diff: {
+              password_type_id: passwordTypeId,
+              password_type_name: typeName,
+              username_from: existing?.username ?? null,
+              username_to: nextUsername ?? null,
+              password_changed: passwordChanged,
+              changes: passwordChanges,
+            },
+          });
+        }
       } catch {
         // ignore
       }
@@ -2144,17 +2172,19 @@ router.put(
       }
 
       // SID-specific history (includes field-level diffs)
-      try {
-        await logSidActivity({
-          actorUserId: req.user!.userId,
-          siteId,
-          sidId,
-          action: 'SID_UPDATED',
-          summary: sidUpdateSummary,
-          diff: { changes },
-        });
-      } catch {
-        // ignore
+      if (changes.length > 0) {
+        try {
+          await logSidActivity({
+            actorUserId: req.user!.userId,
+            siteId,
+            sidId,
+            action: 'SID_UPDATED',
+            summary: sidUpdateSummary,
+            diff: { changes },
+          });
+        } catch {
+          // ignore
+        }
       }
 
       const updated = await adapter.query('SELECT * FROM sids WHERE id = ? AND site_id = ?', [sidId, siteId]);
@@ -2315,28 +2345,6 @@ router.post(
         });
       } catch (err) {
         console.warn('⚠️ Failed to log SID note activity:', err);
-      }
-
-      try {
-        const preview = buildSidNotePreview(body.note_text);
-
-        await logSidActivity({
-          actorUserId: req.user!.userId,
-          siteId,
-          sidId,
-          action: 'SID_NOTE_ADDED',
-          summary,
-          diff: {
-            note_id: noteId,
-            note_type: type,
-            changes: [
-              { field: 'Note Type', from: '—', to: String(type) },
-              { field: 'Note Preview', from: '—', to: preview },
-            ],
-          },
-        });
-      } catch {
-        // ignore
       }
 
       const noteRows = await adapter.query(
@@ -2722,20 +2730,22 @@ router.put(
         }
       }
 
-      try {
-        await logSidActivity({
-          actorUserId: req.user!.userId,
-          siteId,
-          sidId,
-          action: 'SID_NICS_REPLACED',
-          summary: `Replaced NIC list for SID ${sidId}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`,
-          diff: {
-            nic_count: Array.isArray(body.nics) ? body.nics.length : 0,
-            changes: nicChanges,
-          },
-        });
-      } catch {
-        // ignore
+      if (nicChanges.length > 0) {
+        try {
+          await logSidActivity({
+            actorUserId: req.user!.userId,
+            siteId,
+            sidId,
+            action: 'SID_NICS_REPLACED',
+            summary: `Replaced NIC list for SID ${sidId}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`,
+            diff: {
+              nic_count: Array.isArray(body.nics) ? body.nics.length : 0,
+              changes: nicChanges,
+            },
+          });
+        } catch {
+          // ignore
+        }
       }
 
       return res.json({ success: true, data: { nics } } as ApiResponse);
@@ -3776,18 +3786,8 @@ router.put(
 
         // SIDs store status as a string (not a FK). If the picklist status name changes,
         // update any SIDs currently using the previous value.
-        if (
-          nextName !== null &&
-          previousName !== null &&
-          previousName.trim() !== '' &&
-          nextName !== '' &&
-          nextName !== previousName.trim()
-        ) {
-          await adapter.execute('UPDATE sids SET status = ? WHERE site_id = ? AND TRIM(status) = ?', [
-            nextName,
-            siteId,
-            previousName.trim(),
-          ]);
+        if (nextName !== null && previousName !== null && nextName !== previousName) {
+          await adapter.execute('UPDATE sids SET status = ? WHERE site_id = ? AND status = ?', [nextName, siteId, previousName]);
         }
 
         await adapter.commit();
