@@ -5,6 +5,11 @@ import { MemoryRouter } from 'react-router-dom';
 import SiteDetails from '../../../components/sites/SiteDetails';
 import { apiClient } from '../../../lib/api';
 
+const routerFuture = {
+  v7_startTransition: true,
+  v7_relativeSplatPath: true,
+} as const;
+
 vi.mock('../../../components/locations/LocationHierarchyDropdown', () => {
   return {
     default: ({
@@ -119,7 +124,7 @@ describe('SiteDetails', () => {
 
   it('should render site details', async () => {
     render(
-      <MemoryRouter>
+      <MemoryRouter future={routerFuture}>
         <SiteDetails {...mockProps} />
       </MemoryRouter>
     );
@@ -134,7 +139,7 @@ describe('SiteDetails', () => {
 
   it('should not show Edit Site & Delete Site buttons on Cable Index', async () => {
     render(
-      <MemoryRouter>
+      <MemoryRouter future={routerFuture}>
         <SiteDetails {...mockProps} />
       </MemoryRouter>
     );
@@ -154,7 +159,7 @@ describe('SiteDetails', () => {
     };
 
     render(
-      <MemoryRouter>
+      <MemoryRouter future={routerFuture}>
         <SiteDetails {...mockProps} />
       </MemoryRouter>
     );
@@ -168,7 +173,7 @@ describe('SiteDetails', () => {
 
   it('should not show Cable Admin button for non-admin users', async () => {
     render(
-      <MemoryRouter>
+      <MemoryRouter future={routerFuture}>
         <SiteDetails {...mockProps} />
       </MemoryRouter>
     );
@@ -183,7 +188,7 @@ describe('SiteDetails', () => {
   it('should call onBack when back button is clicked', async () => {
     const user = userEvent.setup();
     render(
-      <MemoryRouter>
+      <MemoryRouter future={routerFuture}>
         <SiteDetails {...mockProps} />
       </MemoryRouter>
     );
@@ -199,8 +204,9 @@ describe('SiteDetails', () => {
   });
 
   it('should show loading state initially', () => {
+    vi.mocked(apiClient.getSite).mockReturnValue(new Promise(() => {}) as any);
     render(
-      <MemoryRouter>
+      <MemoryRouter future={routerFuture}>
         <SiteDetails {...mockProps} />
       </MemoryRouter>
     );
@@ -211,7 +217,7 @@ describe('SiteDetails', () => {
     vi.mocked(apiClient.getSite).mockRejectedValue(new Error('API Error'));
 
     render(
-      <MemoryRouter>
+      <MemoryRouter future={routerFuture}>
         <SiteDetails {...mockProps} />
       </MemoryRouter>
     );
@@ -229,7 +235,7 @@ describe('SiteDetails', () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter future={routerFuture}>
         <SiteDetails {...mockProps} />
       </MemoryRouter>
     );
@@ -247,7 +253,7 @@ describe('SiteDetails', () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter future={routerFuture}>
         <SiteDetails {...mockProps} />
       </MemoryRouter>
     );
@@ -268,7 +274,7 @@ describe('SiteDetails', () => {
     });
 
     render(
-      <MemoryRouter>
+      <MemoryRouter future={routerFuture}>
         <SiteDetails {...mockProps} />
       </MemoryRouter>
     );

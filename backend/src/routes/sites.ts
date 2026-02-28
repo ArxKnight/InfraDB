@@ -200,7 +200,7 @@ const sidIdSchema = z.object({
 const getSidsQuerySchema = z
   .object({
     search: z.string().optional(),
-    search_field: z.enum(['any', 'status', 'sid', 'location', 'hostname', 'model']).optional(),
+    search_field: z.enum(['any', 'status', 'sid', 'location', 'hostname', 'model', 'ip', 'cpu', 'power', 'switch_name']).optional(),
     exact: z.enum(['1', '0', 'true', 'false']).optional(),
     show_deleted: z.enum(['1', '0', 'true', 'false']).optional(),
     limit: z.coerce.number().min(1).max(1000).default(50).optional(),
@@ -247,11 +247,14 @@ function parseCommaSeparatedTerms(input: string): string[] {
 }
 
 const createSidSchema = z.object({
-  sid_type_id: z.coerce.number().int().positive().optional().nullable(),
+  sid_type_id: z.coerce.number().int().positive(),
   device_model_id: z.coerce.number().int().positive().optional().nullable(),
   cpu_model_id: z.coerce.number().int().positive().optional().nullable(),
   hostname: z.string().max(255).optional().nullable(),
-  serial_number: z.string().max(255).optional().nullable(),
+  serial_number: z.preprocess(
+    (v) => (typeof v === 'string' ? v.trim() : v),
+    z.string().min(1).max(255)
+  ),
   // Status defaults to "New SID" if omitted/blank.
   status: z.preprocess(
     (v) => (typeof v === 'string' ? v.trim() : v),
@@ -339,7 +342,7 @@ const createSidSchema = z.object({
     },
     z.coerce.number().int().min(1).max(4096).optional().nullable()
   ),
-  location_id: z.coerce.number().int().positive().optional().nullable(),
+  location_id: z.coerce.number().int().positive(),
   // Free-text note for power connection, e.g. "PDU-A1/12".
   pdu_power: z.preprocess(
     (v) => (typeof v === 'string' ? v.trim() : v),
@@ -531,6 +534,10 @@ async function getMissingSidCreatePrerequisites(params: {
     { label: 'Locations', sql: 'SELECT 1 FROM site_locations WHERE site_id = ? LIMIT 1', args: [siteId] },
     { label: 'Models', sql: 'SELECT 1 FROM sid_device_models WHERE site_id = ? LIMIT 1', args: [siteId] },
     { label: 'CPU Models', sql: 'SELECT 1 FROM sid_cpu_models WHERE site_id = ? LIMIT 1', args: [siteId] },
+    { label: 'Password Types', sql: 'SELECT 1 FROM sid_password_types WHERE site_id = ? LIMIT 1', args: [siteId] },
+    { label: 'VLANs', sql: 'SELECT 1 FROM site_vlans WHERE site_id = ? LIMIT 1', args: [siteId] },
+    { label: 'NIC Types', sql: 'SELECT 1 FROM sid_nic_types WHERE site_id = ? LIMIT 1', args: [siteId] },
+    { label: 'NIC Speeds', sql: 'SELECT 1 FROM sid_nic_speeds WHERE site_id = ? LIMIT 1', args: [siteId] },
   ];
 
   const missing: string[] = [];
@@ -736,6 +743,8 @@ router.get(
 
       if (!showDeleted) {
         where.push(`(LOWER(TRIM(COALESCE(s.status, ''))) <> 'deleted')`);
+      } else {
+        where.push(`(LOWER(TRIM(COALESCE(s.status, ''))) = 'deleted')`);
       }
 
       if (search && search.trim() !== '') {
@@ -766,13 +775,77 @@ router.get(
         } else if (search_field === 'model') {
           where.push('(dm.name LIKE ? OR dm.manufacturer LIKE ?)');
           params.push(pattern, pattern);
+        } else if (search_field === 'ip') {
+          where.push('(s.primary_ip LIKE ?)');
+          params.push(pattern);
+        } else if (search_field === 'cpu') {
+          where.push('(cm.name LIKE ?)');
+          params.push(pattern);
+        } else if (search_field === 'power') {
+          where.push('(CAST(COALESCE(s.pdu_power, \'\') AS CHAR) LIKE ?)');
+          params.push(pattern);
+        } else if (search_field === 'switch_name') {
+          where.push(`EXISTS (
+            SELECT 1
+            FROM sid_nics sn
+            LEFT JOIN sid_connections sc ON sc.nic_id = sn.id
+            LEFT JOIN sids sw ON sw.id = sc.switch_sid_id
+            WHERE sn.sid_id = s.id
+              AND UPPER(TRIM(COALESCE(sn.name, ''))) = 'NIC1'
+              AND COALESCE(NULLIF(TRIM(sn.card_name), ''), 'On-Board Network Card') = 'On-Board Network Card'
+              AND sw.hostname LIKE ?
+          )`);
+          params.push(pattern);
         } else if (search_field === 'location') {
           where.push('(sl.label LIKE ? OR si.code LIKE ? OR sl.floor LIKE ? OR sl.suite LIKE ? OR sl.`row` LIKE ? OR sl.rack LIKE ? OR sl.area LIKE ?)');
           params.push(pattern, pattern, pattern, pattern, pattern, pattern, pattern);
         } else {
           // search_field === 'any'
-          where.push('(s.status LIKE ? OR s.sid_number LIKE ? OR s.hostname LIKE ? OR dm.name LIKE ? OR dm.manufacturer LIKE ? OR sl.label LIKE ? OR si.code LIKE ? OR sl.floor LIKE ? OR sl.suite LIKE ? OR sl.`row` LIKE ? OR sl.rack LIKE ? OR sl.area LIKE ?)');
-          params.push(pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern);
+          where.push(`(
+            s.status LIKE ?
+            OR s.sid_number LIKE ?
+            OR s.hostname LIKE ?
+            OR dm.name LIKE ?
+            OR dm.manufacturer LIKE ?
+            OR s.primary_ip LIKE ?
+            OR cm.name LIKE ?
+            OR CAST(COALESCE(s.pdu_power, '') AS CHAR) LIKE ?
+            OR sl.label LIKE ?
+            OR si.code LIKE ?
+            OR sl.floor LIKE ?
+            OR sl.suite LIKE ?
+            OR sl.\`row\` LIKE ?
+            OR sl.rack LIKE ?
+            OR sl.area LIKE ?
+            OR EXISTS (
+              SELECT 1
+              FROM sid_nics sn
+              LEFT JOIN sid_connections sc ON sc.nic_id = sn.id
+              LEFT JOIN sids sw ON sw.id = sc.switch_sid_id
+              WHERE sn.sid_id = s.id
+                AND UPPER(TRIM(COALESCE(sn.name, ''))) = 'NIC1'
+                AND COALESCE(NULLIF(TRIM(sn.card_name), ''), 'On-Board Network Card') = 'On-Board Network Card'
+                AND sw.hostname LIKE ?
+            )
+          )`);
+          params.push(
+            pattern,
+            pattern,
+            pattern,
+            pattern,
+            pattern,
+            pattern,
+            pattern,
+            pattern,
+            pattern,
+            pattern,
+            pattern,
+            pattern,
+            pattern,
+            pattern,
+            pattern,
+            pattern
+          );
         }
       }
 
@@ -795,17 +868,32 @@ router.get(
           s.site_id,
           s.sid_number,
           s.hostname,
+          s.primary_ip,
           s.serial_number,
           s.status,
           s.rack_u,
+          s.pdu_power,
           s.switch_port_count,
           s.sid_type_id,
           st.name as sid_type_name,
           s.device_model_id,
           dm.manufacturer as device_model_manufacturer,
           dm.name as device_model_name,
+          dm.is_switch as device_model_is_switch,
+          dm.default_switch_port_count as device_model_default_switch_port_count,
           s.cpu_model_id,
           cm.name as cpu_model_name,
+          (
+            SELECT sw.hostname
+            FROM sid_nics sn
+            LEFT JOIN sid_connections sc ON sc.nic_id = sn.id
+            LEFT JOIN sids sw ON sw.id = sc.switch_sid_id
+            WHERE sn.sid_id = s.id
+              AND UPPER(TRIM(COALESCE(sn.name, ''))) = 'NIC1'
+              AND COALESCE(NULLIF(TRIM(sn.card_name), ''), 'On-Board Network Card') = 'On-Board Network Card'
+            ORDER BY sn.id ASC, sc.id ASC
+            LIMIT 1
+          ) as primary_switch_hostname,
           sl.floor as location_floor,
           sl.suite as location_suite,
           sl.\`row\` as location_row,
@@ -879,6 +967,21 @@ router.post(
       const rackU = body.rack_u === undefined ? null : normalizeRackU(body.rack_u);
       const adapter = getAdapter();
 
+      const missingRequiredFields: string[] = [];
+      if (!Number.isFinite(Number(body.cpu_count)) || Number(body.cpu_count) <= 0) {
+        missingRequiredFields.push('CPU Count');
+      }
+      if (!Number.isFinite(Number(body.ram_gb)) || Number(body.ram_gb) <= 0) {
+        missingRequiredFields.push('RAM (GB)');
+      }
+      if (missingRequiredFields.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: `Missing required fields: ${missingRequiredFields.join(', ')}`,
+          details: { missing_required_fields: missingRequiredFields },
+        } as ApiResponse);
+      }
+
       // Ensure default statuses exist (useful for new installs and older sites missing picklists).
       // This keeps SID creation functional and makes "New SID" available for defaulting.
       const defaultSidStatusNames = ['New SID', 'Active', 'Awaiting Decommision', 'Decommisioned', 'Deleted'] as const;
@@ -892,7 +995,31 @@ router.post(
       }
 
       const requestedStatus = typeof body.status === 'string' ? body.status.trim() : '';
+      if (requestedStatus.toLowerCase() === 'deleted') {
+        return res.status(400).json({
+          success: false,
+          error: 'Status "Deleted" can only be set by deleting a SID',
+        } as ApiResponse);
+      }
       const statusNameToUse = requestedStatus ? requestedStatus : 'New SID';
+
+      let effectiveSwitchPortCount = body.switch_port_count ?? null;
+      if (body.device_model_id) {
+        const modelRows = await adapter.query(
+          'SELECT is_switch, default_switch_port_count FROM sid_device_models WHERE id = ? AND site_id = ? LIMIT 1',
+          [body.device_model_id, siteId]
+        );
+        const model = (modelRows?.[0] as any) ?? null;
+        if (model) {
+          const modelIsSwitch = Number(model?.is_switch ?? 0) === 1 || model?.is_switch === true;
+          if (!modelIsSwitch) {
+            effectiveSwitchPortCount = null;
+          } else if (effectiveSwitchPortCount === null || effectiveSwitchPortCount === undefined) {
+            const defaultPorts = Number(model?.default_switch_port_count ?? 0);
+            effectiveSwitchPortCount = Number.isFinite(defaultPorts) && defaultPorts > 0 ? defaultPorts : null;
+          }
+        }
+      }
 
       const missing = await getMissingSidCreatePrerequisites({ adapter, siteId });
       if (missing.length > 0) {
@@ -994,7 +1121,7 @@ router.post(
                 ? null
                 : body.gateway_ip.trim()
               : (body.gateway_ip ?? null),
-            body.switch_port_count ?? null,
+            effectiveSwitchPortCount,
             body.location_id ?? null,
             body.pdu_power === '' ? null : (body.pdu_power ?? null),
             rackU,
@@ -1023,12 +1150,13 @@ router.post(
         }
 
         await adapter.commit();
+        const siteName = String(req.site?.name ?? '').trim();
 
         try {
           await logActivity({
             actorUserId: req.user!.userId,
             action: 'SID_CREATED',
-            summary: `Created SID ${sidNumber}`,
+            summary: `Created SID ${sidNumber}${siteName ? ` on ${siteName}` : ''}`,
             siteId,
             metadata: { site_id: siteId, sid_id: sidId, sid_number: sidNumber },
           });
@@ -1088,6 +1216,8 @@ router.get(
           st.name as sid_type_name,
           dm.manufacturer as device_model_manufacturer,
           dm.name as device_model_name,
+          dm.is_switch as device_model_is_switch,
+          dm.default_switch_port_count as device_model_default_switch_port_count,
           cm.name as cpu_model_name,
           sp.name as platform_name,
           sl.floor as location_floor,
@@ -1131,7 +1261,7 @@ router.get(
             siteId,
             sidId,
             action: 'SID_VIEWED',
-            summary: `Opened SID ${sid?.sid_number ?? sidId}`,
+            summary: `Opened SID ${sid?.sid_number ?? sidId}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`,
           });
         } catch {
           // ignore
@@ -1493,7 +1623,7 @@ router.post(
           siteId,
           sidId,
           action: 'SID_PASSWORD_UPDATED',
-          summary: `Added ${typeName} for SID ${sidRow.sid_number}`,
+          summary: `Added ${typeName} for SID ${sidRow.sid_number}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`,
           diff: {
             password_type_id: passwordTypeId,
             password_type_name: typeName,
@@ -1630,7 +1760,7 @@ router.put(
           siteId,
           sidId,
           action: 'SID_PASSWORD_UPDATED',
-          summary: `Updated OS login details for SID ${sidRow.sid_number}`,
+          summary: `Updated OS login details for SID ${sidRow.sid_number}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`,
           diff: {
             username_from: existing?.username ?? null,
             username_to: nextUsername ?? null,
@@ -1763,7 +1893,7 @@ router.put(
           siteId,
           sidId,
           action: 'SID_PASSWORD_UPDATED',
-          summary: `Updated ${typeName} for SID ${sidRow.sid_number}`,
+          summary: `Updated ${typeName} for SID ${sidRow.sid_number}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`,
           diff: {
             password_type_id: passwordTypeId,
             password_type_name: typeName,
@@ -1804,8 +1934,16 @@ router.put(
     try {
       const { id: siteId } = siteIdSchema.parse(req.params);
       const { sidId } = sidIdSchema.parse(req.params);
-      const body = updateSidSchema.parse(req.body);
+      const parsedBody = updateSidSchema.parse(req.body);
+      const body: Record<string, any> = { ...parsedBody };
       const adapter = getAdapter();
+
+      if (typeof body.status === 'string' && body.status.trim().toLowerCase() === 'deleted') {
+        return res.status(400).json({
+          success: false,
+          error: 'Status "Deleted" can only be set by deleting a SID',
+        } as ApiResponse);
+      }
 
       try {
         if (body.status !== undefined && body.status !== null) {
@@ -1822,6 +1960,26 @@ router.put(
       const existing = existingRows[0] as any;
       if (!existing) {
         return res.status(404).json({ success: false, error: 'SID not found' } as ApiResponse);
+      }
+
+      if (Object.prototype.hasOwnProperty.call(body, 'device_model_id') && body.switch_port_count === undefined) {
+        const nextDeviceModelId = body.device_model_id;
+        if (!nextDeviceModelId) {
+          body.switch_port_count = null;
+        } else {
+          const modelRows = await adapter.query(
+            'SELECT is_switch, default_switch_port_count FROM sid_device_models WHERE id = ? AND site_id = ? LIMIT 1',
+            [nextDeviceModelId, siteId]
+          );
+          const model = (modelRows?.[0] as any) ?? null;
+          const modelIsSwitch = Number(model?.is_switch ?? 0) === 1 || model?.is_switch === true;
+          if (!modelIsSwitch) {
+            body.switch_port_count = null;
+          } else {
+            const defaultPorts = Number(model?.default_switch_port_count ?? 0);
+            body.switch_port_count = Number.isFinite(defaultPorts) && defaultPorts > 0 ? defaultPorts : null;
+          }
+        }
       }
 
       if (isDeletedSidStatus(existing.status)) {
@@ -1970,11 +2128,14 @@ router.put(
         throw error;
       }
 
+      const siteName = String(req.site?.name ?? '').trim();
+      const sidUpdateSummary = `Updated SID ${existing.sid_number}${siteName ? ` on ${siteName}` : ''}`;
+
       try {
         await logActivity({
           actorUserId: req.user!.userId,
           action: 'SID_UPDATED',
-          summary: `Updated SID ${existing.sid_number}`,
+          summary: sidUpdateSummary,
           siteId,
           metadata: { site_id: siteId, sid_id: sidId },
         });
@@ -1989,7 +2150,7 @@ router.put(
           siteId,
           sidId,
           action: 'SID_UPDATED',
-          summary: `Updated SID ${existing.sid_number}`,
+          summary: sidUpdateSummary,
           diff: { changes },
         });
       } catch {
@@ -2027,7 +2188,14 @@ router.delete(
       const { sidId } = sidIdSchema.parse(req.params);
       const adapter = getAdapter();
 
-      const existing = await adapter.query('SELECT id, sid_number, status FROM sids WHERE id = ? AND site_id = ? LIMIT 1', [sidId, siteId]);
+      const existing = await adapter.query(
+        `SELECT s.id, s.sid_number, s.status, st.name AS site_name
+         FROM sids s
+         JOIN sites st ON st.id = s.site_id
+         WHERE s.id = ? AND s.site_id = ?
+         LIMIT 1`,
+        [sidId, siteId]
+      );
       const sidRow = existing[0] as any;
       if (!sidRow) {
         return res.status(404).json({ success: false, error: 'SID not found' } as ApiResponse);
@@ -2047,25 +2215,43 @@ router.delete(
           [sidId, siteId]
         );
 
+        const deleteSummary = `Deleted SID ${sidRow.sid_number}${String(sidRow.site_name ?? '').trim() ? ` on ${String(sidRow.site_name ?? '').trim()}` : ''}`;
+
         try {
           await logSidActivity({
             actorUserId: req.user!.userId,
             siteId,
             sidId,
             action: 'SID_DELETED',
-            summary: `Deleted SID ${sidRow.sid_number}`,
+            summary: deleteSummary,
             diff: { status_to: 'Deleted' },
           });
         } catch {
           // ignore
         }
+
+        try {
+          await logActivity({
+            actorUserId: req.user!.userId,
+            action: 'SID_DELETED',
+            summary: deleteSummary,
+            siteId,
+            metadata: { site_id: siteId, sid_id: sidId, sid_number: sidRow.sid_number },
+          });
+        } catch (err) {
+          console.warn('⚠️ Failed to log SID delete activity:', err);
+        }
+
+        return res.json({ success: true, data: { deleted: true } } as ApiResponse);
       }
+
+      const deleteSummary = `Deleted SID ${sidRow.sid_number}${String(sidRow.site_name ?? '').trim() ? ` on ${String(sidRow.site_name ?? '').trim()}` : ''}`;
 
       try {
         await logActivity({
           actorUserId: req.user!.userId,
           action: 'SID_DELETED',
-          summary: `Deleted SID ${sidRow.sid_number}`,
+          summary: deleteSummary,
           siteId,
           metadata: { site_id: siteId, sid_id: sidId, sid_number: sidRow.sid_number },
         });
@@ -2116,12 +2302,14 @@ router.post(
       );
 
       const noteId = Number(insert.insertId ?? adapter.getLastInsertId());
+      const siteName = String(sidRow.site_name ?? '').trim();
+      const summary = `${type === 'CLOSING' ? 'Added closing note' : 'Added note'} for SID ${sidRow.sid_number}${siteName ? ` on ${siteName}` : ''}`;
 
       try {
         await logActivity({
           actorUserId: req.user!.userId,
           action: type === 'CLOSING' ? 'SID_CLOSING_NOTE' : 'SID_NOTE_ADDED',
-          summary: `${type === 'CLOSING' ? 'Added closing note' : 'Added note'} for SID ${sidRow.sid_number}`,
+          summary,
           siteId,
           metadata: { site_id: siteId, sid_id: sidId, note_id: noteId, note_type: type },
         });
@@ -2137,7 +2325,7 @@ router.post(
           siteId,
           sidId,
           action: 'SID_NOTE_ADDED',
-          summary: `${type === 'CLOSING' ? 'Added closing note' : 'Added note'} for SID ${sidRow.sid_number}`,
+          summary,
           diff: {
             note_id: noteId,
             note_type: type,
@@ -2234,7 +2422,7 @@ router.patch(
             siteId,
             sidId,
             action: 'SID_NOTE_PINNED',
-            summary: `Pinned a note for SID ${sidId}`,
+            summary: `Pinned a note for SID ${sidId}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`,
             diff: { note_id: noteId, changes: pinChanges },
           });
         } catch {
@@ -2258,7 +2446,7 @@ router.patch(
             siteId,
             sidId,
             action: 'SID_NOTE_UNPINNED',
-            summary: `Unpinned a note for SID ${sidId}`,
+            summary: `Unpinned a note for SID ${sidId}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`,
             diff: { note_id: noteId, changes: pinChanges },
           });
         } catch {
@@ -2540,7 +2728,7 @@ router.put(
           siteId,
           sidId,
           action: 'SID_NICS_REPLACED',
-          summary: `Replaced NIC list for SID ${sidId}`,
+          summary: `Replaced NIC list for SID ${sidId}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`,
           diff: {
             nic_count: Array.isArray(body.nics) ? body.nics.length : 0,
             changes: nicChanges,
@@ -2685,7 +2873,7 @@ router.put(
           siteId,
           sidId,
           action: 'SID_IPS_REPLACED',
-          summary: `Replaced IP addresses for SID ${sidId}`,
+          summary: `Replaced IP addresses for SID ${sidId}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`,
           diff: { ip_count: cleaned.length, changes: ipChanges },
         });
       } catch {
@@ -2710,6 +2898,51 @@ const createPicklistSchema = z.object({
   description: z.string().max(5000).optional().nullable(),
 });
 const updatePicklistSchema = createPicklistSchema.partial();
+
+const switchPortCountSchema = z.preprocess(
+  (v) => {
+    if (v === undefined || v === null) return v;
+    if (v === '') return null;
+    const n = typeof v === 'number' ? v : Number(v);
+    if (!Number.isFinite(n)) return v;
+    if (n === 0) return null;
+    return v;
+  },
+  z.coerce.number().int().min(1).max(4096).optional().nullable()
+);
+
+const deviceModelSchemaShape = {
+  name: z.string().min(1).max(255),
+  manufacturer: z.string().max(255).optional().nullable(),
+  description: z.string().max(5000).optional().nullable(),
+  is_switch: z.boolean().optional(),
+  default_switch_port_count: switchPortCountSchema,
+  is_patch_panel: z.boolean().optional(),
+  default_patch_panel_port_count: switchPortCountSchema,
+};
+
+const validatePatchPanelPortCount = (data: any, ctx: z.RefinementCtx) => {
+  if (data.is_switch === true && data.is_patch_panel === true) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['is_patch_panel'],
+      message: 'Device model cannot be both Switch and Patch Panel',
+    });
+  }
+  if (data.is_patch_panel === true) {
+    const ports = data.default_patch_panel_port_count;
+    if (!Number.isFinite(Number(ports)) || Number(ports) <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['default_patch_panel_port_count'],
+        message: 'Patch panel port count is required when Patch Panel is enabled',
+      });
+    }
+  }
+};
+
+const createDeviceModelSchema = z.object(deviceModelSchemaShape).superRefine(validatePatchPanelPortCount);
+const updateDeviceModelSchema = z.object(deviceModelSchemaShape).partial().superRefine(validatePatchPanelPortCount);
 
 const createCpuModelSchema = z.object({
   name: z.string().min(1).max(255),
@@ -2903,11 +3136,33 @@ router.post(
   async (req, res) => {
     try {
       const { id: siteId } = siteIdSchema.parse(req.params);
-      const body = createPicklistSchema.parse(req.body);
+      const body = createDeviceModelSchema.parse(req.body);
+      const isSwitch = body.is_switch === true;
+      const defaultSwitchPortCount = isSwitch ? (body.default_switch_port_count ?? null) : null;
+      const isPatchPanel = body.is_patch_panel === true;
+      const defaultPatchPanelPortCount = isPatchPanel ? (body.default_patch_panel_port_count ?? null) : null;
       try {
         const insert = await getAdapter().execute(
-          'INSERT INTO sid_device_models (site_id, manufacturer, name, description) VALUES (?, ?, ?, ?)',
-          [siteId, body.manufacturer ?? null, body.name.trim(), body.description ?? null]
+          `INSERT INTO sid_device_models (
+             site_id,
+             manufacturer,
+             name,
+             description,
+             is_switch,
+             default_switch_port_count,
+             is_patch_panel,
+             default_patch_panel_port_count
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            siteId,
+            body.manufacturer ?? null,
+            body.name.trim(),
+            body.description ?? null,
+            isSwitch,
+            defaultSwitchPortCount,
+            isPatchPanel,
+            defaultPatchPanelPortCount,
+          ]
         );
         const id = Number(insert.insertId ?? getAdapter().getLastInsertId());
         const rows = await getAdapter().query('SELECT * FROM sid_device_models WHERE id = ?', [id]);
@@ -2937,7 +3192,7 @@ router.put(
     try {
       const { id: siteId } = siteIdSchema.parse(req.params);
       const rowId = Number(req.params.rowId);
-      const body = updatePicklistSchema.parse(req.body);
+      const body = updateDeviceModelSchema.parse(req.body);
       await assertPicklistRowBelongsToSite({ adapter: getAdapter(), table: 'sid_device_models', rowId, siteId });
 
       const fields: string[] = [];
@@ -2953,6 +3208,40 @@ router.put(
       if (body.description !== undefined) {
         fields.push('description = ?');
         params.push(body.description ?? null);
+      }
+      if (body.is_switch !== undefined) {
+        fields.push('is_switch = ?');
+        params.push(body.is_switch === true);
+        if (body.is_switch !== true) {
+          fields.push('default_switch_port_count = ?');
+          params.push(null);
+        } else if (body.is_patch_panel === undefined) {
+          fields.push('is_patch_panel = ?');
+          params.push(false);
+          fields.push('default_patch_panel_port_count = ?');
+          params.push(null);
+        }
+      }
+      if (body.default_switch_port_count !== undefined) {
+        fields.push('default_switch_port_count = ?');
+        params.push(body.default_switch_port_count ?? null);
+      }
+      if (body.is_patch_panel !== undefined) {
+        fields.push('is_patch_panel = ?');
+        params.push(body.is_patch_panel === true);
+        if (body.is_patch_panel !== true) {
+          fields.push('default_patch_panel_port_count = ?');
+          params.push(null);
+        } else if (body.is_switch === undefined) {
+          fields.push('is_switch = ?');
+          params.push(false);
+          fields.push('default_switch_port_count = ?');
+          params.push(null);
+        }
+      }
+      if (body.default_patch_panel_port_count !== undefined) {
+        fields.push('default_patch_panel_port_count = ?');
+        params.push(body.default_patch_panel_port_count ?? null);
       }
       if (!fields.length) {
         const rows = await getAdapter().query('SELECT * FROM sid_device_models WHERE id = ?', [rowId]);

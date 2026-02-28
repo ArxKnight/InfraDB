@@ -204,6 +204,7 @@ describe('SiteList', () => {
   });
 
   it('should show loading state initially', () => {
+    vi.mocked(apiClient.getSites).mockReturnValue(new Promise(() => {}) as any);
     render(<SiteList {...mockProps} />);
     expect(screen.getByText('Loading sites...')).toBeInTheDocument();
   });

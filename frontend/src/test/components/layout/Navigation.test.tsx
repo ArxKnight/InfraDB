@@ -4,6 +4,11 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import Navigation from '../../../components/layout/Navigation';
 
+const routerFuture = {
+  v7_startTransition: true,
+  v7_relativeSplatPath: true,
+} as const;
+
 // Mock the auth context
 const mockLogout = vi.fn();
 const mockUseAuth = vi.fn();
@@ -21,7 +26,7 @@ vi.mock('../../../hooks/usePermissions', () => ({
 
 const renderNavigation = (initialPath = '/') => {
   return render(
-    <MemoryRouter initialEntries={[initialPath]}>
+    <MemoryRouter initialEntries={[initialPath]} future={routerFuture}>
       <Navigation />
     </MemoryRouter>
   );

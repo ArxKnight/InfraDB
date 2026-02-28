@@ -1,6 +1,7 @@
 import React from 'react';
 import { toast } from 'sonner';
 import {
+  useLocation,
   useNavigate,
   useParams,
 } from 'react-router-dom';
@@ -182,6 +183,7 @@ function formatHistoryFieldLabel(field: unknown): string {
 }
 
 const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
+  const location = useLocation();
   const navigate = useNavigate();
   const params = useParams();
   const isCreate = mode === 'create';
@@ -236,6 +238,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
 
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleteLoading, setDeleteLoading] = React.useState(false);
+  const [missingRequiredOpen, setMissingRequiredOpen] = React.useState(false);
 
   const shouldLogViewRef = React.useRef<boolean>(!isCreate);
 
@@ -362,6 +365,17 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
     shouldLogViewRef.current = true;
   }, [isCreate, siteId, sidId]);
 
+  React.useEffect(() => {
+    if (isCreate) return;
+    const state = (location.state ?? {}) as any;
+    const createdInSession = state?.sidCreatedInSession === true;
+    const createdSidId = Number(state?.createdSidId ?? 0);
+    if (!createdInSession) return;
+    if (!Number.isFinite(createdSidId) || createdSidId <= 0) return;
+    if (createdSidId !== sidId) return;
+    setAllowLeave(true);
+  }, [isCreate, location.state, sidId]);
+
   const reload = React.useCallback(async () => {
     if (!Number.isFinite(siteId) || siteId <= 0) {
       setError('Invalid site');
@@ -381,6 +395,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
         cpuResp,
         platformResp,
         statusesResp,
+        passwordTypesResp,
         vlanResp,
         nicTypesResp,
         nicSpeedsResp,
@@ -396,6 +411,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
         apiClient.getSiteSidCpuModels(siteId),
         apiClient.getSiteSidPlatforms(siteId),
         apiClient.getSiteSidStatuses(siteId),
+        apiClient.getSiteSidPasswordTypes(siteId),
         apiClient.getSiteSidVlans(siteId),
         apiClient.getSiteSidNicTypes(siteId),
         apiClient.getSiteSidNicSpeeds(siteId),
@@ -450,6 +466,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
 
       const loadedStatuses = statusesResp.success ? (statusesResp.data?.statuses ?? []) : [];
       setStatuses(loadedStatuses);
+      setPasswordTypes(passwordTypesResp.success ? (passwordTypesResp.data?.password_types ?? []) : []);
       if (isCreate) {
         const hasNewSidStatus = (loadedStatuses ?? []).some((s: any) => String(s?.name ?? '').trim() === 'New SID');
         if (hasNewSidStatus) {
@@ -482,9 +499,11 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
   };
 
   const statusOptions = React.useMemo(() => {
-    const names = (statuses ?? []).map((s) => String(s.name));
+    const names = (statuses ?? [])
+      .map((s) => String(s.name))
+      .filter((name) => name.trim().toLowerCase() !== 'deleted');
     const current = (sid?.status ?? '').toString().trim();
-    if (current && !names.includes(current)) return [current, ...names];
+    if (current && current.toLowerCase() !== 'deleted' && !names.includes(current)) return [current, ...names];
     return names;
   }, [statuses, sid?.status]);
 
@@ -498,33 +517,32 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
     if ((locations ?? []).length === 0) missing.push({ key: 'locations', label: 'Locations', href: `/sites/${siteId}/cable` });
     if ((deviceModels ?? []).length === 0) missing.push({ key: 'models', label: 'Models', href: `/sites/${siteId}/sid/admin?tab=devices` });
     if ((cpuModels ?? []).length === 0) missing.push({ key: 'cpuModels', label: 'CPU Models', href: `/sites/${siteId}/sid/admin?tab=cpus` });
+    if ((passwordTypes ?? []).length === 0) missing.push({ key: 'passwordTypes', label: 'Password Types', href: `/sites/${siteId}/sid/admin?tab=passwordTypes` });
+    if ((vlans ?? []).length === 0) missing.push({ key: 'vlans', label: 'VLANs', href: `/sites/${siteId}/sid/admin?tab=vlans` });
+    if ((nicTypes ?? []).length === 0) missing.push({ key: 'nicTypes', label: 'NIC Types', href: `/sites/${siteId}/sid/admin?tab=nicTypes` });
+    if ((nicSpeeds ?? []).length === 0) missing.push({ key: 'nicSpeeds', label: 'NIC Speeds', href: `/sites/${siteId}/sid/admin?tab=nicSpeeds` });
     return missing;
-  }, [isCreate, sidTypes, statuses, platforms, locations, deviceModels, cpuModels, siteId]);
+  }, [isCreate, sidTypes, statuses, platforms, locations, deviceModels, cpuModels, passwordTypes, vlans, nicTypes, nicSpeeds, siteId]);
 
   const createPrereqsReady = missingCreatePrereqs.length === 0;
 
   const DEFAULT_NETWORK_CARD_NAME = 'On-Board Network Card';
 
-  const isSwitchSid = React.useMemo(() => {
-    const selectedTypeId = Number(sid?.sid_type_id ?? 0);
-    const selectedType = (sidTypes ?? []).find((t) => Number(t?.id) === selectedTypeId);
-    const name = String(selectedType?.name ?? sid?.sid_type_name ?? '').trim().toLowerCase();
-    return name === 'switch' || name.includes('switch');
-  }, [sid?.sid_type_id, sid?.sid_type_name, sidTypes]);
-
   const switchSids = React.useMemo(() => {
     const list = Array.isArray(siteSids) ? siteSids : [];
     return list
       .filter((s) => Number(s?.id) !== Number(sidId))
-      .filter((s) => String(s?.sid_type_name ?? '').trim().toLowerCase().includes('switch'))
+      .filter((s) => {
+        const hostname = String(s?.hostname ?? '').trim();
+        const modelSwitch = s?.device_model_is_switch === true || Number(s?.device_model_is_switch ?? 0) === 1;
+        const hasPorts = Number(s?.switch_port_count ?? 0) > 0;
+        return hostname !== '' && (modelSwitch || hasPorts);
+      })
       .slice()
       .sort((a, b) => {
         const ah = String(a?.hostname ?? '').trim();
         const bh = String(b?.hostname ?? '').trim();
-        if (ah && bh) return ah.localeCompare(bh);
-        if (ah) return -1;
-        if (bh) return 1;
-        return String(a?.sid_number ?? '').localeCompare(String(b?.sid_number ?? ''));
+        return ah.localeCompare(bh);
       });
   }, [siteSids, sidId]);
 
@@ -555,7 +573,6 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
       setNetworkingCardTab(cardNames[0] ?? DEFAULT_NETWORK_CARD_NAME);
       setNetworkingNicTab('0');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cardNames.join('|')]);
 
   const cardNics = React.useMemo(() => {
@@ -833,6 +850,9 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
         if (!createPrereqsReady) {
           throw new Error('SID prerequisites not configured');
         }
+        if (missingCreateRequiredFields.length > 0) {
+          throw new Error(`Missing required fields: ${missingCreateRequiredFields.join(', ')}`);
+        }
       }
 
       const payload: Record<string, any> = {
@@ -870,6 +890,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
         }
       } else {
         payload.status = String(sid.status ?? '').trim();
+        payload.serial_number = String(sid.serial_number ?? '').trim();
       }
 
       if (isCreate) {
@@ -904,7 +925,12 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
           }
         }
 
-        navigate(`/sites/${siteId}/sid/${createdSidId}`);
+        navigate(`/sites/${siteId}/sid/${createdSidId}`, {
+          state: {
+            sidCreatedInSession: true,
+            createdSidId,
+          },
+        });
       } else {
         const resp = await apiClient.updateSiteSid(siteId, sidId, payload);
         if (!resp.success) throw new Error(resp.error || 'Failed to save');
@@ -1076,6 +1102,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
       if (!resp.success) throw new Error(resp.error || 'Failed to add note');
       setNewNote('');
       setNotes((prev) => sortNotesPinnedFirst([resp.data?.note, ...(prev ?? [])].filter(Boolean)));
+      setAllowLeave(true);
     } catch (e) {
       setNoteError(e instanceof Error ? e.message : 'Failed to add note');
     } finally {
@@ -1162,6 +1189,62 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
     return (sid?.location_effective_label ?? sid?.location_label ?? '').toString().trim();
   }, [sid?.location_effective_label, sid?.location_label]);
 
+  const onBoardNic1 = React.useMemo(() => {
+    const list = Array.isArray(nics) ? nics : [];
+    return (
+      list.find((n) => {
+        const cardName = String(n?.card_name ?? '').trim() || DEFAULT_NETWORK_CARD_NAME;
+        const nicName = String(n?.name ?? '').trim().toUpperCase();
+        return cardName === DEFAULT_NETWORK_CARD_NAME && nicName === 'NIC1';
+      }) ?? null
+    );
+  }, [nics]);
+
+  const primarySwitchSummary = React.useMemo(() => {
+    const switchId = Number(onBoardNic1?.switch_sid_id ?? 0);
+    if (!Number.isFinite(switchId) || switchId <= 0) return '';
+    return String(switchById.get(switchId)?.hostname ?? '').trim();
+  }, [onBoardNic1?.switch_sid_id, switchById]);
+
+  const primaryPortSummary = React.useMemo(() => {
+    const value = onBoardNic1?.switch_port;
+    if (value == null) return '';
+    return String(value).trim();
+  }, [onBoardNic1?.switch_port]);
+
+  const primaryVlanSummary = React.useMemo(() => {
+    const vlanId = Number(onBoardNic1?.site_vlan_id ?? 0);
+    if (!Number.isFinite(vlanId) || vlanId <= 0) return '';
+    const vlan = (Array.isArray(vlans) ? vlans : []).find((v) => Number(v?.id) === vlanId);
+    if (!vlan) return '';
+    const vlanNumber = String(vlan?.vlan_id ?? '').trim();
+    const vlanName = String(vlan?.name ?? '').trim();
+    if (vlanNumber && vlanName) return `${vlanNumber} — ${vlanName}`;
+    return vlanNumber || vlanName;
+  }, [onBoardNic1?.site_vlan_id, vlans]);
+
+  const missingCreateRequiredFields = React.useMemo(() => {
+    if (!isCreate || !sid) return [] as string[];
+
+    const missing: string[] = [];
+    if (String(sid.status ?? '').trim() === '') missing.push('Status');
+    if (!Number.isFinite(Number(sid.sid_type_id)) || Number(sid.sid_type_id) <= 0) missing.push('SID Type');
+    if (String(sid.serial_number ?? '').trim() === '') missing.push('Serial Number');
+    if (!Number.isFinite(Number(sid.location_id)) || Number(sid.location_id) <= 0) missing.push('Device Location');
+    if (!Number.isFinite(Number(sid.cpu_count)) || Number(sid.cpu_count) <= 0) missing.push('CPU Count');
+    if (!Number.isFinite(Number(sid.ram_gb)) || Number(sid.ram_gb) <= 0) missing.push('RAM (GB)');
+    return missing;
+  }, [
+    isCreate,
+    sid,
+    sid?.status,
+    sid?.sid_type_id,
+    sid?.serial_number,
+    sid?.location_id,
+    sid?.cpu_count,
+    sid?.ram_gb,
+  ]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8 mx-auto w-full max-w-6xl">
@@ -1225,10 +1308,19 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
           )}
 
           <Button
-            onClick={saveSid}
+            onClick={() => {
+              if (isCreate && missingCreateRequiredFields.length > 0) {
+                setSaveError(null);
+                setMissingRequiredOpen(true);
+                return;
+              }
+              void saveSid();
+            }}
             disabled={
               (isCreate
-                ? !canModify || saveLoading || !createPrereqsReady || String(sid?.status ?? '').trim() === ''
+                ? !canModify
+                  || saveLoading
+                  || !createPrereqsReady
                 : !canModify || saveLoading)
             }
           >
@@ -1284,90 +1376,99 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
         </Alert>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Type & Status</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Status</Label>
-                <Select
-                  value={sid.status ? String(sid.status) : ''}
-                  onValueChange={(v) => updateSidLocal({ status: v })}
-                  disabled={!canModify || (isCreate && !createPrereqsReady)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {statusOptions.map((name) => (
-                      <SelectItem key={name} value={name}>
-                        {name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>SID Type</Label>
-                <Select
-                  value={sid.sid_type_id ? String(sid.sid_type_id) : ''}
-                  onValueChange={(v) => updateSidLocal({ sid_type_id: v ? Number(v) : null })}
-                  disabled={!canModify || (isCreate && !createPrereqsReady)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sidTypes.map((t) => (
-                      <SelectItem key={t.id} value={String(t.id)}>
-                        {t.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Summary</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <Select
+                value={sid.status ? String(sid.status) : ''}
+                onValueChange={(v) => updateSidLocal({ status: v })}
+                disabled={!canModify || (isCreate && !createPrereqsReady)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {statusOptions.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          </CardContent>
-        </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Summary</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>SID Number</Label>
-                <Input value={sid.sid_number ?? ''} disabled />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Model</Label>
-                <Input value={modelSummary} disabled />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Platform</Label>
-                <Input value={platformSummary} disabled />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Hostname</Label>
-                <Input value={(sid.hostname ?? '').toString()} disabled />
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label>Location</Label>
-                <Input value={locationSummary} disabled />
-              </div>
+            <div className="space-y-2">
+              <Label>Device Type</Label>
+              <Select
+                value={sid.sid_type_id ? String(sid.sid_type_id) : ''}
+                onValueChange={(v) => updateSidLocal({ sid_type_id: v ? Number(v) : null })}
+                disabled={!canModify || (isCreate && !createPrereqsReady)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sidTypes.map((t) => (
+                    <SelectItem key={t.id} value={String(t.id)}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+
+            <div className="space-y-2">
+              <Label>IP</Label>
+              <Input value={(sid.primary_ip ?? '').toString()} disabled />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Primary Switch</Label>
+              <Input value={primarySwitchSummary} disabled />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Primary Port</Label>
+              <Input value={primaryPortSummary} disabled />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Primary VLAN</Label>
+              <Input value={primaryVlanSummary} disabled />
+            </div>
+
+            <div className="space-y-2">
+              <Label>SID Number</Label>
+              <Input value={sid.sid_number ?? ''} disabled />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Model</Label>
+              <Input value={modelSummary} disabled />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Platform</Label>
+              <Input value={platformSummary} disabled />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Hostname</Label>
+              <Input value={(sid.hostname ?? '').toString()} disabled />
+            </div>
+
+            <div className="space-y-2 md:col-span-2 lg:col-span-3">
+              <Label>Location</Label>
+              <Input value={locationSummary} disabled />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="grid w-full grid-cols-5">
@@ -1876,7 +1977,25 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                         <Label>Device Model</Label>
                         <Select
                           value={sid.device_model_id ? String(sid.device_model_id) : ''}
-                          onValueChange={(v) => updateSidLocal({ device_model_id: v ? Number(v) : null })}
+                          onValueChange={(v) => {
+                            const nextId = v ? Number(v) : null;
+                            const model = deviceModels.find((m) => Number(m?.id) === Number(nextId));
+                            const isSwitchModel = model?.is_switch === true || Number(model?.is_switch ?? 0) === 1;
+                            const defaultPorts = Number(model?.default_switch_port_count ?? 0);
+
+                            updateSidLocal({
+                              device_model_id: nextId,
+                              device_model_manufacturer: model?.manufacturer ?? null,
+                              device_model_name: model?.name ?? null,
+                              device_model_is_switch: isSwitchModel,
+                              switch_port_count:
+                                nextId && isSwitchModel
+                                  ? Number.isFinite(defaultPorts) && defaultPorts > 0
+                                    ? defaultPorts
+                                    : null
+                                  : null,
+                            });
+                          }}
                           disabled={!canModify || (isCreate && !createPrereqsReady)}
                         >
                           <SelectTrigger>
@@ -2059,29 +2178,6 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                               onChange={(e) => updateSidLocal({ hostname: e.target.value })}
                             />
                           </div>
-
-                          {isSwitchSid ? (
-                            <div className="space-y-2">
-                              <Label>Switch Port Count</Label>
-                              <Input
-                                type="number"
-                                min={1}
-                                max={4096}
-                                step={1}
-                                value={sid.switch_port_count ?? ''}
-                                disabled={!canModify || (isCreate && !createPrereqsReady)}
-                                onChange={(e) => {
-                                  const t = e.target.value;
-                                  if (t === '') {
-                                    updateSidLocal({ switch_port_count: null });
-                                    return;
-                                  }
-                                  const n = Number(t);
-                                  updateSidLocal({ switch_port_count: Number.isFinite(n) && n > 0 ? n : null });
-                                }}
-                              />
-                            </div>
-                          ) : null}
                         </div>
 
                         <Tabs
@@ -2191,9 +2287,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                                               <SelectContent>
                                                 {switchSids.map((s) => (
                                                   <SelectItem key={s.id} value={String(s.id)}>
-                                                    {String(s.hostname ?? '').trim()
-                                                      ? `${String(s.hostname).trim()} (${s.sid_number})`
-                                                      : String(s.sid_number)}
+                                                    {String(s.hostname ?? '').trim()}
                                                   </SelectItem>
                                                 ))}
                                               </SelectContent>
@@ -2365,7 +2459,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
             <CardContent>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>Site Location</Label>
+                  <Label>Device Location</Label>
                   <LocationHierarchyDropdown
                     locations={locations}
                     valueLocationId={sid.location_id ? Number(sid.location_id) : null}
@@ -2376,7 +2470,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>PDU SID/Port</Label>
+                  <Label>Power</Label>
                   <Input
                     type="text"
                     value={(sid.pdu_power ?? '').toString()}
@@ -2521,6 +2615,34 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={missingRequiredOpen}
+        onOpenChange={(open) => {
+          if (!open) setMissingRequiredOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Missing required fields</AlertDialogTitle>
+            <AlertDialogDescription>
+              Fill in the following fields before creating this SID:
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="text-sm">
+            <ul className="list-disc pl-5 space-y-1">
+              {missingCreateRequiredFields.map((field) => (
+                <li key={field}>{field}</li>
+              ))}
+            </ul>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setMissingRequiredOpen(false)}>
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={deleteOpen}

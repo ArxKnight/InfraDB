@@ -39,6 +39,11 @@ const queryClient = new QueryClient({
   },
 })
 
+const routerFuture = {
+  v7_startTransition: true,
+  v7_relativeSplatPath: true,
+} as const;
+
 function App() {
   const [setupRequired, setSetupRequired] = React.useState<boolean | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -97,7 +102,7 @@ function App() {
         <ErrorBoundary>
           <QueryClientProvider client={queryClient}>
             <AuthProvider>
-              <Router>
+              <Router future={routerFuture}>
                 <div className="min-h-screen bg-background text-foreground">
                   <Routes>
                 <Route path="/" element={<Navigate to="/sites" replace />} />

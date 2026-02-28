@@ -36,6 +36,7 @@ import {
   TableHeader,
   TableRow,
 } from '../components/ui/table';
+import { Switch } from '../components/ui/switch';
 import SiteLocationsManager from '../components/sites/SiteLocationsManager';
 
 type PicklistKind =
@@ -85,6 +86,10 @@ const SiteSidAdminPage: React.FC = () => {
   const [newTypeName, setNewTypeName] = React.useState('');
   const [newDeviceManufacturer, setNewDeviceManufacturer] = React.useState('');
   const [newDeviceName, setNewDeviceName] = React.useState('');
+  const [newDeviceIsSwitch, setNewDeviceIsSwitch] = React.useState(false);
+  const [newDeviceDefaultSwitchPortCount, setNewDeviceDefaultSwitchPortCount] = React.useState('');
+  const [newDeviceIsPatchPanel, setNewDeviceIsPatchPanel] = React.useState(false);
+  const [newDeviceDefaultPatchPanelPortCount, setNewDeviceDefaultPatchPanelPortCount] = React.useState('');
   const [newCpuManufacturer, setNewCpuManufacturer] = React.useState('');
   const [newCpuName, setNewCpuName] = React.useState('');
   const [newCpuCores, setNewCpuCores] = React.useState('');
@@ -100,6 +105,10 @@ const SiteSidAdminPage: React.FC = () => {
   const [editTypeName, setEditTypeName] = React.useState('');
   const [editDeviceManufacturer, setEditDeviceManufacturer] = React.useState('');
   const [editDeviceName, setEditDeviceName] = React.useState('');
+  const [editDeviceIsSwitch, setEditDeviceIsSwitch] = React.useState(false);
+  const [editDeviceDefaultSwitchPortCount, setEditDeviceDefaultSwitchPortCount] = React.useState('');
+  const [editDeviceIsPatchPanel, setEditDeviceIsPatchPanel] = React.useState(false);
+  const [editDeviceDefaultPatchPanelPortCount, setEditDeviceDefaultPatchPanelPortCount] = React.useState('');
   const [editCpuManufacturer, setEditCpuManufacturer] = React.useState('');
   const [editCpuName, setEditCpuName] = React.useState('');
   const [editCpuCores, setEditCpuCores] = React.useState('');
@@ -115,6 +124,11 @@ const SiteSidAdminPage: React.FC = () => {
   const [activeTab, setActiveTab] = React.useState<
     'types' | 'devices' | 'cpus' | 'platforms' | 'statuses' | 'locations' | 'passwordTypes' | 'vlans' | 'nicTypes' | 'nicSpeeds'
   >('types');
+
+  const visibleStatuses = React.useMemo(
+    () => (statuses ?? []).filter((s) => String(s?.name ?? '').trim().toLowerCase() !== 'deleted'),
+    [statuses]
+  );
 
   React.useEffect(() => {
     const tab = new URLSearchParams(location.search).get('tab');
@@ -145,6 +159,14 @@ const SiteSidAdminPage: React.FC = () => {
     } else if (kind === 'deviceModel') {
       setEditDeviceManufacturer(String(row.manufacturer ?? ''));
       setEditDeviceName(String(row.name ?? ''));
+      setEditDeviceIsSwitch(Boolean(row.is_switch));
+      setEditDeviceDefaultSwitchPortCount(
+        row.default_switch_port_count != null ? String(row.default_switch_port_count) : ''
+      );
+      setEditDeviceIsPatchPanel(Boolean(row.is_patch_panel));
+      setEditDeviceDefaultPatchPanelPortCount(
+        row.default_patch_panel_port_count != null ? String(row.default_patch_panel_port_count) : ''
+      );
     } else if (kind === 'cpuModel') {
       setEditCpuManufacturer(String(row.manufacturer ?? ''));
       setEditCpuName(String(row.name ?? ''));
@@ -264,8 +286,18 @@ const SiteSidAdminPage: React.FC = () => {
   const createDeviceModel = async () => {
     if (!requireAdmin()) return;
     const name = newDeviceName.trim();
+    const defaultPortCount = Number(newDeviceDefaultSwitchPortCount);
+    const defaultPatchPanelPortCount = Number(newDeviceDefaultPatchPanelPortCount);
     if (!name) {
       setOpError('Name is required');
+      return;
+    }
+    if (newDeviceIsSwitch && (!Number.isFinite(defaultPortCount) || defaultPortCount <= 0 || defaultPortCount > 4096)) {
+      setOpError('Switch port count must be 1-4096');
+      return;
+    }
+    if (newDeviceIsPatchPanel && (!Number.isFinite(defaultPatchPanelPortCount) || defaultPatchPanelPortCount <= 0 || defaultPatchPanelPortCount > 4096)) {
+      setOpError('Patch panel port count must be 1-4096');
       return;
     }
 
@@ -275,10 +307,18 @@ const SiteSidAdminPage: React.FC = () => {
       const resp = await apiClient.createSiteSidDeviceModel(siteId, {
         manufacturer: newDeviceManufacturer.trim() || null,
         name,
+        is_switch: newDeviceIsSwitch,
+        default_switch_port_count: newDeviceIsSwitch ? defaultPortCount : null,
+        is_patch_panel: newDeviceIsPatchPanel,
+        default_patch_panel_port_count: newDeviceIsPatchPanel ? defaultPatchPanelPortCount : null,
       });
       if (!resp.success) throw new Error(resp.error || 'Failed to create device model');
       setNewDeviceManufacturer('');
       setNewDeviceName('');
+      setNewDeviceIsSwitch(false);
+      setNewDeviceDefaultSwitchPortCount('');
+      setNewDeviceIsPatchPanel(false);
+      setNewDeviceDefaultPatchPanelPortCount('');
       await load();
       closeAddDialog();
     } catch (e) {
@@ -816,6 +856,10 @@ const SiteSidAdminPage: React.FC = () => {
                   setOpError(null);
                   setNewDeviceManufacturer('');
                   setNewDeviceName('');
+                  setNewDeviceIsSwitch(false);
+                  setNewDeviceDefaultSwitchPortCount('');
+                  setNewDeviceIsPatchPanel(false);
+                  setNewDeviceDefaultPatchPanelPortCount('');
                   setAddDialog('deviceModel');
                 }}
                 disabled={!canAdmin || busy}
@@ -829,6 +873,10 @@ const SiteSidAdminPage: React.FC = () => {
                   <TableRow>
                     <TableHead>Manufacturer</TableHead>
                     <TableHead>Name</TableHead>
+                    <TableHead>Switch Model</TableHead>
+                    <TableHead>Switch Ports</TableHead>
+                    <TableHead>Patch Panel</TableHead>
+                    <TableHead>Patch Panel Ports</TableHead>
                     <TableHead className="w-[160px]"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -837,6 +885,10 @@ const SiteSidAdminPage: React.FC = () => {
                     <TableRow key={m.id}>
                       <TableCell>{m.manufacturer || '—'}</TableCell>
                       <TableCell className="font-medium">{m.name}</TableCell>
+                      <TableCell>{Boolean(m.is_switch) ? 'Yes' : 'No'}</TableCell>
+                      <TableCell>{Boolean(m.is_switch) ? (m.default_switch_port_count ?? '—') : '—'}</TableCell>
+                      <TableCell>{Boolean(m.is_patch_panel) ? 'Yes' : 'No'}</TableCell>
+                      <TableCell>{Boolean(m.is_patch_panel) ? (m.default_patch_panel_port_count ?? '—') : '—'}</TableCell>
                       <TableCell className="text-right">
                         <Button
                           variant="ghost"
@@ -980,18 +1032,28 @@ const SiteSidAdminPage: React.FC = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {statuses.map((s) => (
+                  {visibleStatuses.map((s) => (
                     <TableRow key={s.id}>
                       <TableCell className="font-medium">{s.name}</TableCell>
                       <TableCell className="text-right">
                         <Button
                           variant="ghost"
-                          onClick={() => openEditDialog('status', s)}
+                          onClick={() => {
+                            if (String(s?.name ?? '').trim().toLowerCase() === 'deleted') return;
+                            openEditDialog('status', s);
+                          }}
                           disabled={!canAdmin || busy}
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" onClick={() => deleteStatus(s.id)} disabled={!canAdmin || busy}>
+                        <Button
+                          variant="ghost"
+                          onClick={() => {
+                            if (String(s?.name ?? '').trim().toLowerCase() === 'deleted') return;
+                            deleteStatus(s.id);
+                          }}
+                          disabled={!canAdmin || busy}
+                        >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </TableCell>
@@ -1269,6 +1331,70 @@ const SiteSidAdminPage: React.FC = () => {
                   disabled={!canAdmin || busy}
                 />
               </div>
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <Label htmlFor="edit-device-is-switch">Is Switch Model</Label>
+                <Switch
+                  id="edit-device-is-switch"
+                  checked={editDeviceIsSwitch}
+                  onCheckedChange={(checked) => {
+                    const next = Boolean(checked);
+                    setEditDeviceIsSwitch(next);
+                    if (!next) {
+                      setEditDeviceDefaultSwitchPortCount('');
+                      return;
+                    }
+                    setEditDeviceIsPatchPanel(false);
+                    setEditDeviceDefaultPatchPanelPortCount('');
+                  }}
+                  disabled={!canAdmin || busy}
+                />
+              </div>
+              {editDeviceIsSwitch && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-device-default-switch-port-count">Default Switch Port Count</Label>
+                  <Input
+                    id="edit-device-default-switch-port-count"
+                    type="number"
+                    min={1}
+                    max={4096}
+                    value={editDeviceDefaultSwitchPortCount}
+                    onChange={(e) => setEditDeviceDefaultSwitchPortCount(e.target.value)}
+                    disabled={!canAdmin || busy}
+                  />
+                </div>
+              )}
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <Label htmlFor="edit-device-is-patch-panel">Is Patch Panel Model</Label>
+                <Switch
+                  id="edit-device-is-patch-panel"
+                  checked={editDeviceIsPatchPanel}
+                  onCheckedChange={(checked) => {
+                    const next = Boolean(checked);
+                    setEditDeviceIsPatchPanel(next);
+                    if (!next) {
+                      setEditDeviceDefaultPatchPanelPortCount('');
+                      return;
+                    }
+                    setEditDeviceIsSwitch(false);
+                    setEditDeviceDefaultSwitchPortCount('');
+                  }}
+                  disabled={!canAdmin || busy}
+                />
+              </div>
+              {editDeviceIsPatchPanel && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-device-default-patch-panel-port-count">Default Patch Panel Port Count</Label>
+                  <Input
+                    id="edit-device-default-patch-panel-port-count"
+                    type="number"
+                    min={1}
+                    max={4096}
+                    value={editDeviceDefaultPatchPanelPortCount}
+                    onChange={(e) => setEditDeviceDefaultPatchPanelPortCount(e.target.value)}
+                    disabled={!canAdmin || busy}
+                  />
+                </div>
+              )}
             </div>
           )}
 
@@ -1417,13 +1543,27 @@ const SiteSidAdminPage: React.FC = () => {
                   await requestPicklistUpdate('sidType', editRowId, { name });
                 } else if (editDialog === 'deviceModel') {
                   const name = editDeviceName.trim();
+                  const defaultPortCount = Number(editDeviceDefaultSwitchPortCount);
+                  const defaultPatchPanelPortCount = Number(editDeviceDefaultPatchPanelPortCount);
                   if (!name) {
                     setOpError('Name is required');
+                    return;
+                  }
+                  if (editDeviceIsSwitch && (!Number.isFinite(defaultPortCount) || defaultPortCount <= 0 || defaultPortCount > 4096)) {
+                    setOpError('Switch port count must be 1-4096');
+                    return;
+                  }
+                  if (editDeviceIsPatchPanel && (!Number.isFinite(defaultPatchPanelPortCount) || defaultPatchPanelPortCount <= 0 || defaultPatchPanelPortCount > 4096)) {
+                    setOpError('Patch panel port count must be 1-4096');
                     return;
                   }
                   await requestPicklistUpdate('deviceModel', editRowId, {
                     manufacturer: editDeviceManufacturer.trim() || null,
                     name,
+                    is_switch: editDeviceIsSwitch,
+                    default_switch_port_count: editDeviceIsSwitch ? defaultPortCount : null,
+                    is_patch_panel: editDeviceIsPatchPanel,
+                    default_patch_panel_port_count: editDeviceIsPatchPanel ? defaultPatchPanelPortCount : null,
                   });
                 } else if (editDialog === 'cpuModel') {
                   const name = editCpuName.trim();
@@ -1611,6 +1751,72 @@ const SiteSidAdminPage: React.FC = () => {
                   placeholder="e.g., R740"
                 />
               </div>
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <Label htmlFor="add-device-is-switch">Is Switch Model</Label>
+                <Switch
+                  id="add-device-is-switch"
+                  checked={newDeviceIsSwitch}
+                  onCheckedChange={(checked) => {
+                    const next = Boolean(checked);
+                    setNewDeviceIsSwitch(next);
+                    if (!next) {
+                      setNewDeviceDefaultSwitchPortCount('');
+                      return;
+                    }
+                    setNewDeviceIsPatchPanel(false);
+                    setNewDeviceDefaultPatchPanelPortCount('');
+                  }}
+                  disabled={!canAdmin || busy}
+                />
+              </div>
+              {newDeviceIsSwitch && (
+                <div className="space-y-2">
+                  <Label htmlFor="add-device-default-switch-port-count">Default Switch Port Count</Label>
+                  <Input
+                    id="add-device-default-switch-port-count"
+                    type="number"
+                    min={1}
+                    max={4096}
+                    value={newDeviceDefaultSwitchPortCount}
+                    onChange={(e) => setNewDeviceDefaultSwitchPortCount(e.target.value)}
+                    disabled={!canAdmin || busy}
+                    placeholder="e.g., 24"
+                  />
+                </div>
+              )}
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <Label htmlFor="add-device-is-patch-panel">Is Patch Panel Model</Label>
+                <Switch
+                  id="add-device-is-patch-panel"
+                  checked={newDeviceIsPatchPanel}
+                  onCheckedChange={(checked) => {
+                    const next = Boolean(checked);
+                    setNewDeviceIsPatchPanel(next);
+                    if (!next) {
+                      setNewDeviceDefaultPatchPanelPortCount('');
+                      return;
+                    }
+                    setNewDeviceIsSwitch(false);
+                    setNewDeviceDefaultSwitchPortCount('');
+                  }}
+                  disabled={!canAdmin || busy}
+                />
+              </div>
+              {newDeviceIsPatchPanel && (
+                <div className="space-y-2">
+                  <Label htmlFor="add-device-default-patch-panel-port-count">Default Patch Panel Port Count</Label>
+                  <Input
+                    id="add-device-default-patch-panel-port-count"
+                    type="number"
+                    min={1}
+                    max={4096}
+                    value={newDeviceDefaultPatchPanelPortCount}
+                    onChange={(e) => setNewDeviceDefaultPatchPanelPortCount(e.target.value)}
+                    disabled={!canAdmin || busy}
+                    placeholder="e.g., 24"
+                  />
+                </div>
+              )}
             </div>
           )}
 
@@ -1627,7 +1833,7 @@ const SiteSidAdminPage: React.FC = () => {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="add-cpu-name">Name</Label>
+                <Label htmlFor="add-cpu-name">Model</Label>
                 <Input
                   id="add-cpu-name"
                   value={newCpuName}

@@ -6,6 +6,11 @@ import userEvent from '@testing-library/user-event';
 import AdminPage from '../../pages/AdminPage';
 import { AuthProvider } from '../../contexts/AuthContext';
 
+const routerFuture = {
+  v7_startTransition: true,
+  v7_relativeSplatPath: true,
+} as const;
+
 // Mock the admin components
 vi.mock('../../components/admin/UserManagement', () => ({
   default: () => <div data-testid="user-management">User Management Component</div>
@@ -48,7 +53,7 @@ const createWrapper = () => {
 
   return ({ children }: { children: React.ReactNode }) => (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <BrowserRouter future={routerFuture}>
         <AuthProvider>
           {children}
         </AuthProvider>
@@ -129,7 +134,7 @@ describe('AdminPage - Non-Admin Access', () => {
 
     const Wrapper = ({ children }: { children: React.ReactNode }) => (
       <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
+        <BrowserRouter future={routerFuture}>
           <AuthProvider>
             {children}
           </AuthProvider>

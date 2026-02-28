@@ -140,7 +140,6 @@ const SetupPage: React.FC = () => {
     setConnectionError('');
     setConnectionProbe(null);
     setValue('reuseExistingDatabase', false, { shouldDirty: true, shouldValidate: false });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     dbValues.host,
     dbValues.port,

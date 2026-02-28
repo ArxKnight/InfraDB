@@ -223,6 +223,208 @@ describe('Site Routes', () => {
     });
   });
 
+  describe('GET /api/sites/:id/sids', () => {
+    it('returns primary switch hostname from On-Board NIC1 via sid_connections', async () => {
+      const site = await siteModel.create({ name: 'SID Site', code: 'SS', created_by: testUser.id });
+
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, status, hostname)
+         VALUES (?, ?, ?, ?)`
+        , [site.id, '10', 'Active', 'switch-alpha']
+      );
+
+      const switchRows = await db.query('SELECT id FROM sids WHERE site_id = ? AND sid_number = ? LIMIT 1', [site.id, '10']);
+      const switchSidId = Number((switchRows?.[0] as any)?.id);
+
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, status, hostname)
+         VALUES (?, ?, ?, ?)`
+        , [site.id, '11', 'Active', 'target-host']
+      );
+
+      const targetRows = await db.query('SELECT id FROM sids WHERE site_id = ? AND sid_number = ? LIMIT 1', [site.id, '11']);
+      const targetSidId = Number((targetRows?.[0] as any)?.id);
+
+      await db.execute(
+        `INSERT INTO sid_nics (sid_id, card_name, name)
+         VALUES (?, ?, ?)`
+        , [targetSidId, null, 'NIC1']
+      );
+
+      const nicRows = await db.query('SELECT id FROM sid_nics WHERE sid_id = ? AND name = ? ORDER BY id DESC LIMIT 1', [targetSidId, 'NIC1']);
+      const nicId = Number((nicRows?.[0] as any)?.id);
+
+      await db.execute(
+        `INSERT INTO sid_connections (site_id, sid_id, nic_id, switch_sid_id, switch_port)
+         VALUES (?, ?, ?, ?, ?)`
+        , [site.id, targetSidId, nicId, switchSidId, '1']
+      );
+
+      const response = await request(app)
+        .get(`/api/sites/${site.id}/sids?search_field=sid&limit=200`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      const target = (response.body.data.sids ?? []).find((s: any) => Number(s.id) === targetSidId);
+      expect(target).toBeTruthy();
+      expect(target.primary_switch_hostname).toBe('switch-alpha');
+    });
+
+    it('supports filtering by switch_name against On-Board NIC1 switch hostname', async () => {
+      const site = await siteModel.create({ name: 'Filter Site', code: 'FS', created_by: testUser.id });
+
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, status, hostname)
+         VALUES (?, ?, ?, ?), (?, ?, ?, ?)`
+        , [
+          site.id, '20', 'Active', 'switch-beta',
+          site.id, '21', 'Active', 'switch-gamma',
+        ]
+      );
+
+      const switchRows = await db.query(
+        'SELECT id, sid_number, hostname FROM sids WHERE site_id = ? AND sid_number IN (?, ?) ORDER BY sid_number ASC',
+        [site.id, '20', '21']
+      );
+      const switchBySidNumber = new Map<string, any>();
+      for (const row of switchRows as any[]) {
+        switchBySidNumber.set(String(row.sid_number), row);
+      }
+
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, status, hostname)
+         VALUES (?, ?, ?, ?), (?, ?, ?, ?)`
+        , [
+          site.id, '22', 'Active', 'target-beta',
+          site.id, '23', 'Active', 'target-gamma',
+        ]
+      );
+
+      const targetRows = await db.query(
+        'SELECT id, sid_number FROM sids WHERE site_id = ? AND sid_number IN (?, ?) ORDER BY sid_number ASC',
+        [site.id, '22', '23']
+      );
+
+      for (const row of targetRows as any[]) {
+        const sidNumber = String(row.sid_number);
+        const switchRow = sidNumber === '22' ? switchBySidNumber.get('20') : switchBySidNumber.get('21');
+
+        await db.execute(
+          `INSERT INTO sid_nics (sid_id, card_name, name)
+           VALUES (?, ?, ?)`
+          , [Number(row.id), null, 'NIC1']
+        );
+
+        const nicRows = await db.query('SELECT id FROM sid_nics WHERE sid_id = ? AND name = ? ORDER BY id DESC LIMIT 1', [Number(row.id), 'NIC1']);
+        const nicId = Number((nicRows?.[0] as any)?.id);
+
+        await db.execute(
+          `INSERT INTO sid_connections (site_id, sid_id, nic_id, switch_sid_id, switch_port)
+           VALUES (?, ?, ?, ?, ?)`
+          , [site.id, Number(row.id), nicId, Number(switchRow.id), '1']
+        );
+      }
+
+      const response = await request(app)
+        .get(`/api/sites/${site.id}/sids?search=switch-beta&search_field=switch_name&limit=200`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      const sidNumbers = (response.body.data.sids ?? []).map((s: any) => String(s.sid_number));
+      expect(sidNumbers).toContain('22');
+      expect(sidNumbers).not.toContain('23');
+    });
+  });
+
+  describe('POST /api/sites/:id/sids', () => {
+    it('rejects create when CPU Count and RAM (GB) are missing', async () => {
+      const site = await siteModel.create({ name: 'SID Create Site', code: 'SCS', created_by: testUser.id });
+
+      await db.execute(
+        `INSERT INTO sid_types (site_id, name)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE name = name`
+        , [site.id, 'Server']
+      );
+      await db.execute(
+        `INSERT INTO sid_statuses (site_id, name)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE name = name`
+        , [site.id, 'New SID']
+      );
+      await db.execute(
+        `INSERT INTO sid_platforms (site_id, name)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE name = name`
+        , [site.id, 'Linux']
+      );
+      await db.execute(
+        `INSERT INTO sid_device_models (site_id, manufacturer, name)
+         VALUES (?, ?, ?)`
+        , [site.id, 'Dell', 'R740']
+      );
+      await db.execute(
+        `INSERT INTO sid_cpu_models (site_id, name)
+         VALUES (?, ?)`
+        , [site.id, 'Xeon Gold']
+      );
+      await db.execute(
+        `INSERT INTO sid_password_types (site_id, name)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE name = name`
+        , [site.id, 'OS Credentials']
+      );
+      await db.execute(
+        `INSERT INTO site_vlans (site_id, vlan_id, name)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE name = VALUES(name)`
+        , [site.id, 10, 'Servers']
+      );
+      await db.execute(
+        `INSERT INTO sid_nic_types (site_id, name)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE name = name`
+        , [site.id, 'RJ45']
+      );
+      await db.execute(
+        `INSERT INTO sid_nic_speeds (site_id, name)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE name = name`
+        , [site.id, '1G']
+      );
+
+      const location = await siteLocationModel.create({
+        site_id: site.id,
+        floor: '1',
+        suite: 'A',
+        row: 'R1',
+        rack: '01',
+      });
+
+      const sidTypes = await db.query('SELECT id FROM sid_types WHERE site_id = ? ORDER BY id ASC LIMIT 1', [site.id]);
+      const sidTypeId = Number((sidTypes?.[0] as any)?.id);
+
+      const response = await request(app)
+        .post(`/api/sites/${site.id}/sids`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          sid_type_id: sidTypeId,
+          serial_number: 'SN-REQ-001',
+          location_id: location.id,
+          status: 'New SID',
+        })
+        .expect(400);
+
+      expect(response.body.success).toBe(false);
+      expect(response.body.error).toContain('Missing required fields');
+      expect(response.body.error).toContain('CPU Count');
+      expect(response.body.error).toContain('RAM (GB)');
+      expect(response.body.details?.missing_required_fields).toEqual(['CPU Count', 'RAM (GB)']);
+    });
+  });
+
   describe('POST /api/sites', () => {
     it('should create new site', async () => {
       const siteData = {

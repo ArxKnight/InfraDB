@@ -165,8 +165,8 @@ export function PortsPreview(opts: {
           const line2 = `${bankPrefix}${prefix} ${portStr}`.trim();
 
           return (
-            <LabelFrame key={p} className="p-1">
-              <div className="h-14 w-14 flex flex-col items-center justify-center gap-1">
+            <LabelFrame key={p} className="p-1 w-fit justify-self-center">
+              <div className="h-[4.5rem] w-[4.5rem] flex flex-col items-center justify-center gap-1">
                 <div className="text-[11px] font-semibold leading-none text-center w-full truncate">{hostname}</div>
                 <div className="text-[11px] font-semibold leading-none text-center w-full truncate">{line2}</div>
               </div>
@@ -197,8 +197,8 @@ export function PduPreview(opts: { pduSid: string; fromPort: number; toPort: num
           const line = `${sid} ${portStr}`;
 
           return (
-            <LabelFrame key={p} className="p-1">
-              <div className="h-14 w-14 flex items-center justify-center">
+            <LabelFrame key={p} className="p-1 w-fit justify-self-center">
+              <div className="h-[4.5rem] w-[4.5rem] flex items-center justify-center">
                 <div className="text-[12px] font-semibold leading-tight text-center w-full truncate">{line}</div>
               </div>
             </LabelFrame>

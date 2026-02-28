@@ -380,7 +380,7 @@ class ApiClient {
     siteId: number,
     params?: {
       search?: string;
-      search_field?: 'any' | 'status' | 'sid' | 'location' | 'hostname' | 'model';
+      search_field?: 'any' | 'status' | 'sid' | 'location' | 'hostname' | 'model' | 'ip' | 'cpu' | 'power' | 'switch_name';
       exact?: boolean;
       show_deleted?: boolean;
       limit?: number;
@@ -649,7 +649,15 @@ class ApiClient {
     return this.request<{ sids_using: number }>(`/sites/${siteId}/sid/device-models/${rowId}/usage`);
   }
 
-  async createSiteSidDeviceModel(siteId: number, data: { manufacturer?: string | null; name: string; description?: string | null }) {
+  async createSiteSidDeviceModel(siteId: number, data: {
+    manufacturer?: string | null;
+    name: string;
+    description?: string | null;
+    is_switch?: boolean;
+    default_switch_port_count?: number | null;
+    is_patch_panel?: boolean;
+    default_patch_panel_port_count?: number | null;
+  }) {
     return this.request<{ device_model: any }>(`/sites/${siteId}/sid/device-models`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -659,7 +667,15 @@ class ApiClient {
   async updateSiteSidDeviceModel(
     siteId: number,
     rowId: number,
-    data: { manufacturer?: string | null; name?: string; description?: string | null }
+    data: {
+      manufacturer?: string | null;
+      name?: string;
+      description?: string | null;
+      is_switch?: boolean;
+      default_switch_port_count?: number | null;
+      is_patch_panel?: boolean;
+      default_patch_panel_port_count?: number | null;
+    }
   ) {
     return this.request<{ device_model: any }>(`/sites/${siteId}/sid/device-models/${rowId}`, {
       method: 'PUT',

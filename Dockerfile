@@ -15,7 +15,7 @@ COPY backend/package*.json ./backend/
 COPY frontend/package*.json ./frontend/
 
 # Install dependencies
-RUN cd backend && npm ci --only=production
+RUN cd backend && npm ci
 RUN cd frontend && npm ci
 
 # Build frontend
@@ -45,9 +45,9 @@ RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 infradb
 
 # Install production dependencies
-COPY --from=deps /app/backend/node_modules ./backend/node_modules
+COPY backend/package*.json ./backend/
+RUN cd backend && npm ci --omit=dev
 COPY --from=backend-builder /app/backend/dist ./backend/dist
-COPY --from=backend-builder /app/backend/package.json ./backend/
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 COPY --from=frontend-builder /app/frontend/public ./frontend/public
 

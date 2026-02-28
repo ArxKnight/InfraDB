@@ -4,6 +4,11 @@ import userEvent from '@testing-library/user-event';
 import { BrowserRouter } from 'react-router-dom';
 import ProfilePage from '../../pages/ProfilePage';
 
+const routerFuture = {
+  v7_startTransition: true,
+  v7_relativeSplatPath: true,
+} as const;
+
 // Mock the auth context
 const mockUseAuth = vi.fn();
 
@@ -34,7 +39,7 @@ vi.mock('../../lib/api', () => ({
 
 const renderProfilePage = () => {
   return render(
-    <BrowserRouter>
+    <BrowserRouter future={routerFuture}>
       <ProfilePage />
     </BrowserRouter>
   );

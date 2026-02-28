@@ -1,6 +1,8 @@
 import connection from '../connection.js';
 import { DatabaseAdapter } from '../adapters/base.js';
 import { Migration001_BaselineSchema } from './001_baseline_schema.js';
+import { Migration002_SidDeviceModelsSwitchFields } from './002_sid_device_models_switch_fields.js';
+import { Migration003_SidDeviceModelsPatchPanelFields } from './003_sid_device_models_patch_panel_fields.js';
 
 export interface Migration {
   id: string;
@@ -12,6 +14,8 @@ export interface Migration {
 // List of all migrations in order
 const migrations: Migration[] = [
   Migration001_BaselineSchema,
+  Migration002_SidDeviceModelsSwitchFields,
+  Migration003_SidDeviceModelsPatchPanelFields,
 ];
 
 export const LATEST_MIGRATION_ID = migrations[migrations.length - 1]?.id;

@@ -57,6 +57,56 @@ describe('Site Model', () => {
       expect(site.location ?? null).toBeNull();
       expect(site.description ?? null).toBeNull();
     });
+
+    it('seeds default NIC speeds for a new site', async () => {
+      const site = await siteModel.create({
+        name: 'NIC Speed Site',
+        code: 'NSS',
+        created_by: testUserId,
+      });
+
+      const rows = await db.query(
+        'SELECT name FROM sid_nic_speeds WHERE site_id = ? ORDER BY name ASC',
+        [site.id]
+      );
+      const names = (rows as any[]).map((r: any) => String(r.name));
+
+      expect(names).toHaveLength(6);
+      expect(new Set(names)).toEqual(new Set(['100Mbps', '1Gbps', '2.5Gbps', '10Gbps', '25Gbps', '100Gbps']));
+    });
+
+    it('seeds default NIC types for a new site', async () => {
+      const site = await siteModel.create({
+        name: 'NIC Type Site',
+        code: 'NTS',
+        created_by: testUserId,
+      });
+
+      const rows = await db.query(
+        'SELECT name FROM sid_nic_types WHERE site_id = ? ORDER BY name ASC',
+        [site.id]
+      );
+      const names = (rows as any[]).map((r: any) => String(r.name));
+
+      expect(names).toHaveLength(6);
+      expect(new Set(names)).toEqual(new Set(['RJ11', 'RJ45', 'SFP', 'SFP+', 'DAC', 'SFP28']));
+    });
+
+    it('seeds default platforms for a new site', async () => {
+      const site = await siteModel.create({
+        name: 'Platform Site',
+        code: 'PLT',
+        created_by: testUserId,
+      });
+
+      const rows = await db.query(
+        'SELECT name FROM sid_platforms WHERE site_id = ? ORDER BY name ASC',
+        [site.id]
+      );
+      const names = (rows as any[]).map((r: any) => String(r.name));
+
+      expect(names).toEqual(['Linux', 'Windows']);
+    });
   });
 
   describe('findById', () => {

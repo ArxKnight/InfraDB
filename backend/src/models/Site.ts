@@ -80,6 +80,39 @@ export class SiteModel {
         );
       }
 
+      // Seed default Platforms so new sites can immediately classify SIDs.
+      const defaultPlatformNames = ['Windows', 'Linux'] as const;
+      for (const platformName of defaultPlatformNames) {
+        await this.adapter.execute(
+          `INSERT INTO sid_platforms (site_id, name, description)
+           VALUES (?, ?, NULL)
+           ON DUPLICATE KEY UPDATE name = name`,
+          [siteId, platformName]
+        );
+      }
+
+      // Seed default NIC Types so new sites can immediately configure NICs.
+      const defaultNicTypeNames = ['RJ11', 'RJ45', 'SFP', 'SFP+', 'DAC', 'SFP28'] as const;
+      for (const nicTypeName of defaultNicTypeNames) {
+        await this.adapter.execute(
+          `INSERT INTO sid_nic_types (site_id, name, description)
+           VALUES (?, ?, NULL)
+           ON DUPLICATE KEY UPDATE name = name`,
+          [siteId, nicTypeName]
+        );
+      }
+
+      // Seed default NIC Speeds so new sites can immediately configure NICs.
+      const defaultNicSpeedNames = ['100Mbps', '1Gbps', '2.5Gbps', '10Gbps', '25Gbps', '100Gbps'] as const;
+      for (const nicSpeedName of defaultNicSpeedNames) {
+        await this.adapter.execute(
+          `INSERT INTO sid_nic_speeds (site_id, name, description)
+           VALUES (?, ?, NULL)
+           ON DUPLICATE KEY UPDATE name = name`,
+          [siteId, nicSpeedName]
+        );
+      }
+
       await this.adapter.commit();
       return (await this.findById(siteId))!;
     } catch (error) {

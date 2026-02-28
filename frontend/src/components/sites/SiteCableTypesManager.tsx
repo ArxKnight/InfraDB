@@ -77,7 +77,6 @@ const SiteCableTypesManager: React.FC<SiteCableTypesManagerProps> = ({ siteId, s
     setFormOpen(false);
     resetForm();
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteId]);
 
   const closeForm = () => {

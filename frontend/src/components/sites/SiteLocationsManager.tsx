@@ -116,7 +116,6 @@ const SiteLocationsManager: React.FC<SiteLocationsManagerProps> = ({ siteId, sit
     setFormOpen(false);
     resetForm();
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteId]);
 
   const closeForm = () => {

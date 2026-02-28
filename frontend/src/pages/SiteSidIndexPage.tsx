@@ -44,7 +44,7 @@ const SiteSidIndexPage: React.FC = () => {
   const [error, setError] = React.useState<string | null>(null);
 
   const [search, setSearch] = React.useState('');
-  const [searchField, setSearchField] = React.useState<'status' | 'sid' | 'location' | 'hostname' | 'model'>('sid');
+  const [searchField, setSearchField] = React.useState<'status' | 'sid' | 'location' | 'hostname' | 'model' | 'ip' | 'cpu' | 'power' | 'switch_name'>('sid');
   const [matchExact, setMatchExact] = React.useState(false);
   const [showDeleted, setShowDeleted] = React.useState(false);
   const [sids, setSids] = React.useState<any[]>([]);
@@ -173,7 +173,7 @@ const SiteSidIndexPage: React.FC = () => {
   }
 
   return (
-    <div className="pt-4 space-y-6 mx-auto w-full max-w-6xl">
+    <div className="pt-4 space-y-6 mx-auto w-full max-w-6xl xl:max-w-[96rem] 2xl:max-w-[112rem]">
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <Button variant="ghost" onClick={() => navigate(`/sites/${siteId}`)}>
@@ -224,6 +224,10 @@ const SiteSidIndexPage: React.FC = () => {
                     <SelectItem value="location">Rack Location</SelectItem>
                     <SelectItem value="hostname">Hostname</SelectItem>
                     <SelectItem value="model">Model</SelectItem>
+                    <SelectItem value="ip">IP</SelectItem>
+                    <SelectItem value="cpu">CPU</SelectItem>
+                    <SelectItem value="power">Power</SelectItem>
+                    <SelectItem value="switch_name">Switch Name</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -237,6 +241,8 @@ const SiteSidIndexPage: React.FC = () => {
                       ? 'SID'
                       : searchField === 'location'
                         ? 'Rack Location'
+                        : searchField === 'switch_name'
+                          ? 'Switch Name'
                         : searchField.charAt(0).toUpperCase() + searchField.slice(1)
                   }…`}
                   className="pl-8"
@@ -282,7 +288,7 @@ const SiteSidIndexPage: React.FC = () => {
             ) : sids.length === 0 ? (
               <div className="py-6 text-sm text-muted-foreground">No SIDs found.</div>
             ) : (
-              <Table>
+              <Table className="lg:[&_th]:whitespace-nowrap lg:[&_td]:whitespace-nowrap">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Status</TableHead>
@@ -290,7 +296,11 @@ const SiteSidIndexPage: React.FC = () => {
                     <TableHead>Location</TableHead>
                     <TableHead>Rack Entry</TableHead>
                     <TableHead>Hostname</TableHead>
+                    <TableHead>IP</TableHead>
                     <TableHead>Model</TableHead>
+                    <TableHead>CPU</TableHead>
+                    <TableHead>Power</TableHead>
+                    <TableHead>Switch Name</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -305,6 +315,7 @@ const SiteSidIndexPage: React.FC = () => {
                       <TableCell>{formatSidLocation(sid)}</TableCell>
                       <TableCell>{formatRackEntry(sid)}</TableCell>
                       <TableCell>{sid.hostname || '—'}</TableCell>
+                      <TableCell>{(sid.primary_ip ?? '').toString().trim() || '—'}</TableCell>
                       <TableCell>
                         {sid.device_model_name
                           ? sid.device_model_manufacturer
@@ -312,6 +323,9 @@ const SiteSidIndexPage: React.FC = () => {
                             : sid.device_model_name
                           : '—'}
                       </TableCell>
+                      <TableCell>{(sid.cpu_model_name ?? '').toString().trim() || '—'}</TableCell>
+                      <TableCell>{(sid.pdu_power ?? '').toString().trim() || '—'}</TableCell>
+                      <TableCell>{(sid.primary_switch_hostname ?? '').toString().trim() || '—'}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
