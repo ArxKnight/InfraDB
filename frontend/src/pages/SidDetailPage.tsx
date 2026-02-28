@@ -5,7 +5,7 @@ import {
   useNavigate,
   useParams,
 } from 'react-router-dom';
-import { ArrowLeft, Loader2, Pencil, Pin, PinOff, Save } from 'lucide-react';
+import { ArrowLeft, Loader2, Pencil, Pin, PinOff, Plus, Save, Trash2 } from 'lucide-react';
 
 import { ApiError, apiClient } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -206,6 +206,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
   const [sid, setSid] = React.useState<SidRecord | null>(null);
   const [notes, setNotes] = React.useState<any[]>([]);
   const [nics, setNics] = React.useState<any[]>([]);
+  const [extraIps, setExtraIps] = React.useState<string[]>([]);
 
   const isReadOnly = !isCreate && String((sid as any)?.status ?? '').trim().toLowerCase() === 'deleted';
   const canModify = canModifyBase && !isReadOnly;
@@ -390,6 +391,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
       const [
         siteResp,
         sidResp,
+        ipResp,
         typesResp,
         dmResp,
         cpuResp,
@@ -406,6 +408,9 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
         isCreate
           ? Promise.resolve({ success: true, data: { sid: null, notes: [], nics: [] } } as any)
           : apiClient.getSiteSid(siteId, sidId, { log_view: shouldLogViewRef.current }),
+        isCreate
+          ? Promise.resolve({ success: true, data: { ip_addresses: [] } } as any)
+          : apiClient.getSiteSidIpAddresses(siteId, sidId),
         apiClient.getSiteSidTypes(siteId),
         apiClient.getSiteSidDeviceModels(siteId),
         apiClient.getSiteSidCpuModels(siteId),
@@ -452,10 +457,12 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
         });
         setNotes([]);
         setNics([]);
+        setExtraIps([]);
       } else {
         setSid(sidResp.data?.sid ?? null);
         setNotes(sortNotesPinnedFirst(sidResp.data?.notes ?? []));
         setNics(sidResp.data?.nics ?? []);
+        setExtraIps(ipResp.success ? (ipResp.data?.ip_addresses ?? []) : []);
         shouldLogViewRef.current = false;
       }
 
@@ -611,6 +618,18 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
       setHistoryLoading(false);
     }
   }, [siteId, sidId]);
+
+  const normalizeExtraIps = React.useCallback((values: string[]): string[] => {
+    return Array.from(
+      new Set(
+        (Array.isArray(values) ? values : [])
+          .map((value) => value.trim())
+          .filter((value) => value !== '')
+      )
+    ).slice(0, 200);
+  }, []);
+
+  const extraIpCount = React.useMemo(() => normalizeExtraIps(extraIps).length, [extraIps, normalizeExtraIps]);
 
   const loadPassword = React.useCallback(async () => {
     if (isCreate) return;
@@ -925,6 +944,23 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
           }
         }
 
+        // Persist Extra IPs as part of Create SID.
+        if (canEdit) {
+          try {
+            const cleanedExtraIps = normalizeExtraIps(extraIps);
+            const ipsResp = await apiClient.replaceSiteSidIpAddresses(siteId, createdSidId, {
+              ip_addresses: cleanedExtraIps,
+            });
+
+            if (ipsResp.success) {
+              setExtraIps(ipsResp.data?.ip_addresses ?? cleanedExtraIps);
+            }
+          } catch (err) {
+            console.error('[Create SID] Failed to save extra IP addresses:', err);
+            toast.error('SID created, but failed to save extra IPs. You can edit IPs after opening the SID.');
+          }
+        }
+
         navigate(`/sites/${siteId}/sid/${createdSidId}`, {
           state: {
             sidCreatedInSession: true,
@@ -953,6 +989,13 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
 
           if (!nicsResp.success) throw new Error(nicsResp.error || 'Failed to save NICs');
           setNics(nicsResp.data?.nics ?? []);
+
+          const cleanedExtraIps = normalizeExtraIps(extraIps);
+          const ipsResp = await apiClient.replaceSiteSidIpAddresses(siteId, sidId, {
+            ip_addresses: cleanedExtraIps,
+          });
+          if (!ipsResp.success) throw new Error(ipsResp.error || 'Failed to save IP addresses');
+          setExtraIps(ipsResp.data?.ip_addresses ?? cleanedExtraIps);
         }
 
         await reload();
@@ -2441,6 +2484,60 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                               updateSidLocal({ gateway_ip: v.trim() === '' ? null : v });
                             }}
                           />
+                        </div>
+
+                        <div className="space-y-3 md:col-span-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <Label>Extra IPs</Label>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={!canModify || (isCreate && !createPrereqsReady)}
+                              onClick={() => setExtraIps((prev) => [...(Array.isArray(prev) ? prev : []), ''])}
+                            >
+                              <Plus className="mr-2 h-4 w-4" />
+                              Add Extra IP
+                            </Button>
+                          </div>
+
+                          {extraIps.length === 0 ? (
+                            <div className="text-sm text-muted-foreground">No extra IPs added.</div>
+                          ) : (
+                            <div className="space-y-2">
+                              {extraIps.map((value, idx) => (
+                                <div key={`extra-ip-${idx}`} className="flex items-center gap-2">
+                                  <Input
+                                    value={value}
+                                    disabled={!canModify || (isCreate && !createPrereqsReady)}
+                                    placeholder={`Extra IP ${idx + 1}`}
+                                    onChange={(e) => {
+                                      const nextValue = e.target.value;
+                                      setExtraIps((prev) => {
+                                        const next = Array.isArray(prev) ? prev.slice() : [];
+                                        next[idx] = nextValue;
+                                        return next;
+                                      });
+                                    }}
+                                  />
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    disabled={!canModify || (isCreate && !createPrereqsReady)}
+                                    aria-label={`Remove Extra IP ${idx + 1}`}
+                                    onClick={() => {
+                                      setExtraIps((prev) => (Array.isArray(prev) ? prev.filter((_, i) => i !== idx) : []));
+                                    }}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="text-xs text-muted-foreground">{extraIpCount} extra IP(s)</div>
                         </div>
                       </div>
                     </TabsContent>
