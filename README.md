@@ -292,6 +292,15 @@ Set at minimum:
 - `MYSQL_PASSWORD`
 - `MYSQL_DATABASE`
 
+### Configure frontend env (optional)
+```bash
+# Linux/macOS
+cp frontend/.env.example frontend/.env
+
+# Windows PowerShell
+Copy-Item frontend/.env.example frontend/.env
+```
+
 ### Run dev
 ```bash
 npm run dev
