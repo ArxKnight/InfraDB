@@ -4,6 +4,8 @@ import { Migration001_BaselineSchema } from './001_baseline_schema.js';
 import { Migration002_SidDeviceModelsSwitchFields } from './002_sid_device_models_switch_fields.js';
 import { Migration003_SidDeviceModelsPatchPanelFields } from './003_sid_device_models_patch_panel_fields.js';
 import { Migration004_SidActivityHistoryCleanup } from './004_sid_activity_history_cleanup.js';
+import { Migration005_SidDeviceModelsRackU } from './005_sid_device_models_rack_u.js';
+import { Migration006_SiteLocationsRackSizeU } from './006_site_locations_rack_size_u.js';
 
 export interface Migration {
   id: string;
@@ -18,6 +20,8 @@ const migrations: Migration[] = [
   Migration002_SidDeviceModelsSwitchFields,
   Migration003_SidDeviceModelsPatchPanelFields,
   Migration004_SidActivityHistoryCleanup,
+  Migration005_SidDeviceModelsRackU,
+  Migration006_SiteLocationsRackSizeU,
 ];
 
 export const LATEST_MIGRATION_ID = migrations[migrations.length - 1]?.id;

@@ -289,6 +289,7 @@ class ApiClient {
     suite?: string;
     row?: string;
     rack?: string;
+    rack_size_u?: number;
     area?: string;
     label?: string;
   }) {
@@ -307,6 +308,7 @@ class ApiClient {
       suite?: string | null;
       row?: string | null;
       rack?: string | null;
+      rack_size_u?: number | null | '';
       area?: string | null;
       label?: string | null;
     }
@@ -653,6 +655,7 @@ class ApiClient {
     manufacturer?: string | null;
     name: string;
     description?: string | null;
+    rack_u?: number | null;
     is_switch?: boolean;
     default_switch_port_count?: number | null;
     is_patch_panel?: boolean;
@@ -671,6 +674,7 @@ class ApiClient {
       manufacturer?: string | null;
       name?: string;
       description?: string | null;
+      rack_u?: number | null;
       is_switch?: boolean;
       default_switch_port_count?: number | null;
       is_patch_panel?: boolean;

@@ -1,5 +1,6 @@
 # Multi-stage build for InfraDB
 FROM node:22-slim AS base
+RUN npm install -g npm@11.11.0
 
 # Install dependencies only when needed
 FROM base AS deps

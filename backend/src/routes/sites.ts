@@ -104,6 +104,16 @@ const cableTypeIdSchema = z.object({
 });
 
 const locationTemplateTypeSchema = z.enum(['DATACENTRE', 'DOMESTIC']);
+const locationRackSizeUSchema = z.preprocess(
+  (v) => {
+    if (v === undefined || v === null) return v;
+    if (v === '') return undefined;
+    const n = typeof v === 'number' ? v : Number(v);
+    if (!Number.isFinite(n)) return v;
+    return Math.trunc(n);
+  },
+  z.coerce.number().int().min(1).max(99).optional()
+);
 
 const createLocationSchema = z
   .object({
@@ -113,6 +123,7 @@ const createLocationSchema = z
     suite: z.string().max(50).optional(),
     row: z.string().max(50).optional(),
     rack: z.string().max(50).optional(),
+    rack_size_u: locationRackSizeUSchema,
     area: z.string().max(64).optional(),
   })
   .superRefine((data, ctx) => {
@@ -127,6 +138,9 @@ const createLocationSchema = z
       }
       if (!data.rack || data.rack.trim() === '') {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['rack'], message: 'Rack is required' });
+      }
+      if (!Number.isFinite(Number(data.rack_size_u)) || Number(data.rack_size_u) <= 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['rack_size_u'], message: 'Rack Size (U) is required' });
       }
       if (data.area && data.area.trim() !== '') {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['area'], message: 'Area must be empty for Datacentre/Commercial locations' });
@@ -149,6 +163,7 @@ const updateLocationSchema = z
     suite: z.string().max(50).optional().or(z.literal('')),
     row: z.string().max(50).optional().or(z.literal('')),
     rack: z.string().max(50).optional().or(z.literal('')),
+    rack_size_u: locationRackSizeUSchema.or(z.literal('')),
     area: z.string().max(64).optional().or(z.literal('')),
   })
   .superRefine((data, ctx) => {
@@ -2158,6 +2173,8 @@ router.put(
 
       const siteName = String(req.site?.name ?? '').trim();
       const sidUpdateSummary = `Updated SID ${existing.sid_number}${siteName ? ` on ${siteName}` : ''}`;
+      const sidUpdateRemovedSummary = `Removed details from SID ${existing.sid_number}${siteName ? ` on ${siteName}` : ''}`;
+      const sidUpdateAddedSummary = `Added details to SID ${existing.sid_number}${siteName ? ` on ${siteName}` : ''}`;
 
       try {
         await logActivity({
@@ -2174,14 +2191,50 @@ router.put(
       // SID-specific history (includes field-level diffs)
       if (changes.length > 0) {
         try {
-          await logSidActivity({
-            actorUserId: req.user!.userId,
-            siteId,
-            sidId,
-            action: 'SID_UPDATED',
-            summary: sidUpdateSummary,
-            diff: { changes },
-          });
+          const isEmptySidValue = (value: unknown): boolean => {
+            if (value === null || value === undefined) return true;
+            if (typeof value === 'string') return value.trim() === '';
+            return false;
+          };
+
+          const removedChanges = changes.filter((change) => !isEmptySidValue(change.from) && isEmptySidValue(change.to));
+          const addedChanges = changes.filter((change) => isEmptySidValue(change.from) && !isEmptySidValue(change.to));
+          const updatedChanges = changes.filter(
+            (change) => !removedChanges.includes(change) && !addedChanges.includes(change)
+          );
+
+          if (removedChanges.length > 0) {
+            await logSidActivity({
+              actorUserId: req.user!.userId,
+              siteId,
+              sidId,
+              action: 'SID_UPDATED',
+              summary: sidUpdateRemovedSummary,
+              diff: { changes: removedChanges },
+            });
+          }
+
+          if (addedChanges.length > 0) {
+            await logSidActivity({
+              actorUserId: req.user!.userId,
+              siteId,
+              sidId,
+              action: 'SID_UPDATED',
+              summary: sidUpdateAddedSummary,
+              diff: { changes: addedChanges },
+            });
+          }
+
+          if (updatedChanges.length > 0) {
+            await logSidActivity({
+              actorUserId: req.user!.userId,
+              siteId,
+              sidId,
+              action: 'SID_UPDATED',
+              summary: sidUpdateSummary,
+              diff: { changes: updatedChanges },
+            });
+          }
         } catch {
           // ignore
         }
@@ -2732,17 +2785,56 @@ router.put(
 
       if (nicChanges.length > 0) {
         try {
-          await logSidActivity({
-            actorUserId: req.user!.userId,
-            siteId,
-            sidId,
-            action: 'SID_NICS_REPLACED',
-            summary: `Replaced NIC list for SID ${sidId}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`,
-            diff: {
-              nic_count: Array.isArray(body.nics) ? body.nics.length : 0,
-              changes: nicChanges,
-            },
-          });
+          const nicSummary = `Replaced NIC list for SID ${sidId}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`;
+          const nicRemovedSummary = `Removed NICs from SID ${sidId}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`;
+          const nicAddedSummary = `Added NICs to SID ${sidId}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`;
+          const removedNicChanges = nicChanges.filter((change) => String(change.from) === 'Present' && String(change.to) === 'Removed');
+          const addedNicChanges = nicChanges.filter((change) => String(change.from) === '—' && String(change.to) === 'Added');
+          const updatedNicChanges = nicChanges.filter(
+            (change) => !removedNicChanges.includes(change) && !addedNicChanges.includes(change)
+          );
+
+          if (removedNicChanges.length > 0) {
+            await logSidActivity({
+              actorUserId: req.user!.userId,
+              siteId,
+              sidId,
+              action: 'SID_NICS_REPLACED',
+              summary: nicRemovedSummary,
+              diff: {
+                nic_count: Array.isArray(body.nics) ? body.nics.length : 0,
+                changes: removedNicChanges,
+              },
+            });
+          }
+
+          if (addedNicChanges.length > 0) {
+            await logSidActivity({
+              actorUserId: req.user!.userId,
+              siteId,
+              sidId,
+              action: 'SID_NICS_REPLACED',
+              summary: nicAddedSummary,
+              diff: {
+                nic_count: Array.isArray(body.nics) ? body.nics.length : 0,
+                changes: addedNicChanges,
+              },
+            });
+          }
+
+          if (updatedNicChanges.length > 0) {
+            await logSidActivity({
+              actorUserId: req.user!.userId,
+              siteId,
+              sidId,
+              action: 'SID_NICS_REPLACED',
+              summary: nicSummary,
+              diff: {
+                nic_count: Array.isArray(body.nics) ? body.nics.length : 0,
+                changes: updatedNicChanges,
+              },
+            });
+          }
         } catch {
           // ignore
         }
@@ -2873,19 +2965,57 @@ router.put(
         const afterSet = new Set(cleaned);
         const removedIps = existingIps.filter((ip) => !afterSet.has(ip));
         const addedIps = cleaned.filter((ip) => !beforeSet.has(ip));
-        const ipChanges: Array<{ field: string; from: string; to: string }> = [
-          ...removedIps.map((ip) => ({ field: 'IP Address', from: ip, to: 'Removed' })),
-          ...addedIps.map((ip) => ({ field: 'IP Address', from: '—', to: ip })),
-        ];
+        const getIpOrdinalMap = (values: string[]): Map<string, number> => {
+          const ordinals = new Map<string, number>();
+          for (let i = 0; i < values.length; i++) {
+            const ip = values[i];
+            if (typeof ip !== 'string') continue;
+            if (!ordinals.has(ip)) {
+              ordinals.set(ip, i + 1);
+            }
+          }
+          return ordinals;
+        };
 
-        await logSidActivity({
-          actorUserId: req.user!.userId,
-          siteId,
-          sidId,
-          action: 'SID_IPS_REPLACED',
-          summary: `Replaced IP addresses for SID ${sidId}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`,
-          diff: { ip_count: cleaned.length, changes: ipChanges },
-        });
+        const beforeOrdinals = getIpOrdinalMap(existingIps);
+        const afterOrdinals = getIpOrdinalMap(cleaned);
+
+        const removedChanges: Array<{ field: string; from: string; to: string }> = removedIps.map((ip) => ({
+          field: `Extra IP-${beforeOrdinals.get(ip) ?? 1} Address`,
+          from: ip,
+          to: 'Removed',
+        }));
+
+        const addedChanges: Array<{ field: string; from: string; to: string }> = addedIps.map((ip) => ({
+          field: `Extra IP-${afterOrdinals.get(ip) ?? 1} Address`,
+          from: '—',
+          to: ip,
+        }));
+
+        const removedSummary = `Removed extra IP addresses for SID ${sidId}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`;
+        const addedSummary = `Added extra IP addresses for SID ${sidId}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`;
+
+        if (removedChanges.length > 0) {
+          await logSidActivity({
+            actorUserId: req.user!.userId,
+            siteId,
+            sidId,
+            action: 'SID_IPS_REPLACED',
+            summary: removedSummary,
+            diff: { ip_count: cleaned.length, changes: removedChanges },
+          });
+        }
+
+        if (addedChanges.length > 0) {
+          await logSidActivity({
+            actorUserId: req.user!.userId,
+            siteId,
+            sidId,
+            action: 'SID_IPS_REPLACED',
+            summary: addedSummary,
+            diff: { ip_count: cleaned.length, changes: addedChanges },
+          });
+        }
       } catch {
         // ignore
       }
@@ -2921,10 +3051,22 @@ const switchPortCountSchema = z.preprocess(
   z.coerce.number().int().min(1).max(4096).optional().nullable()
 );
 
+const deviceModelRackUSchema = z.preprocess(
+  (v) => {
+    if (v === undefined || v === null) return v;
+    if (v === '') return null;
+    const n = typeof v === 'number' ? v : Number(v);
+    if (!Number.isFinite(n)) return v;
+    return Math.trunc(n);
+  },
+  z.coerce.number().int().min(1).max(99).optional().nullable()
+);
+
 const deviceModelSchemaShape = {
   name: z.string().min(1).max(255),
   manufacturer: z.string().max(255).optional().nullable(),
   description: z.string().max(5000).optional().nullable(),
+  rack_u: deviceModelRackUSchema,
   is_switch: z.boolean().optional(),
   default_switch_port_count: switchPortCountSchema,
   is_patch_panel: z.boolean().optional(),
@@ -3158,16 +3300,18 @@ router.post(
              manufacturer,
              name,
              description,
+             rack_u,
              is_switch,
              default_switch_port_count,
              is_patch_panel,
              default_patch_panel_port_count
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             siteId,
             body.manufacturer ?? null,
             body.name.trim(),
             body.description ?? null,
+            body.rack_u ?? null,
             isSwitch,
             defaultSwitchPortCount,
             isPatchPanel,
@@ -3218,6 +3362,10 @@ router.put(
       if (body.description !== undefined) {
         fields.push('description = ?');
         params.push(body.description ?? null);
+      }
+      if (body.rack_u !== undefined) {
+        fields.push('rack_u = ?');
+        params.push(body.rack_u ?? null);
       }
       if (body.is_switch !== undefined) {
         fields.push('is_switch = ?');
@@ -4690,6 +4838,7 @@ router.post('/:id/locations', authenticateToken, resolveSiteAccess(req => Number
           suite: (dataParsed.suite ?? '').toString().trim(),
           row: (dataParsed.row ?? '').toString().trim(),
           rack: (dataParsed.rack ?? '').toString().trim(),
+          rack_size_u: Number(dataParsed.rack_size_u),
         }
     );
 
@@ -4709,6 +4858,7 @@ router.post('/:id/locations', authenticateToken, resolveSiteAccess(req => Number
           suite: (location as any).suite,
           row: (location as any).row,
           rack: (location as any).rack,
+          rack_size_u: (location as any).rack_size_u,
           area: (location as any).area,
           template_type: (location as any).template_type,
         },
@@ -4799,12 +4949,24 @@ router.put('/:id/locations/:locationId', authenticateToken, resolveSiteAccess(re
       rackUpdate = rackTrimmed !== '' ? rackTrimmed : null;
     }
 
+    let rackSizeUUpdate: number | null | undefined;
+    if (dataParsed.rack_size_u !== undefined) {
+      const raw = dataParsed.rack_size_u;
+      if (raw === '') {
+        rackSizeUUpdate = null;
+      } else {
+        const parsed = Number(raw);
+        rackSizeUUpdate = Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : null;
+      }
+    }
+
     const location = await siteLocationModel.update(locationId, id, {
       ...(dataParsed.template_type !== undefined ? { template_type: dataParsed.template_type } : {}),
       ...(dataParsed.floor !== undefined ? { floor: dataParsed.floor } : {}),
       ...(suiteUpdate !== undefined ? { suite: suiteUpdate } : {}),
       ...(rowUpdate !== undefined ? { row: rowUpdate } : {}),
       ...(rackUpdate !== undefined ? { rack: rackUpdate } : {}),
+      ...(rackSizeUUpdate !== undefined ? { rack_size_u: rackSizeUUpdate } : {}),
       ...(areaUpdate !== undefined ? { area: areaUpdate } : {}),
       ...(labelUpdate !== undefined ? { label: labelUpdate } : {}),
     });

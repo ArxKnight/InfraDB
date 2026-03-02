@@ -70,6 +70,10 @@ type PendingNetworkingRemoval =
   | { kind: 'nic'; globalNicIndex: number; nextSelectedNicTab: string; label: string }
   | null;
 
+type PendingExtraIpRemoval =
+  | { index: number; label: string; ipText: string }
+  | null;
+
 function isNotePinned(note: any): boolean {
   return note?.pinned === true;
 }
@@ -234,6 +238,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
   const [newNetworkCardName, setNewNetworkCardName] = React.useState('');
   const [newNetworkCardError, setNewNetworkCardError] = React.useState<string | null>(null);
   const [pendingNetworkingRemoval, setPendingNetworkingRemoval] = React.useState<PendingNetworkingRemoval>(null);
+  const [pendingExtraIpRemoval, setPendingExtraIpRemoval] = React.useState<PendingExtraIpRemoval>(null);
   const [saveLoading, setSaveLoading] = React.useState(false);
   const [saveError, setSaveError] = React.useState<string | null>(null);
 
@@ -521,7 +526,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
     if ((sidTypes ?? []).length === 0) missing.push({ key: 'types', label: 'Device Types', href: `/sites/${siteId}/sid/admin?tab=types` });
     if ((statuses ?? []).length === 0) missing.push({ key: 'statuses', label: 'SID Statuses', href: `/sites/${siteId}/sid/admin?tab=statuses` });
     if ((platforms ?? []).length === 0) missing.push({ key: 'platforms', label: 'Platforms', href: `/sites/${siteId}/sid/admin?tab=platforms` });
-    if ((locations ?? []).length === 0) missing.push({ key: 'locations', label: 'Locations', href: `/sites/${siteId}/cable` });
+    if ((locations ?? []).length === 0) missing.push({ key: 'locations', label: 'Locations', href: `/sites/${siteId}/sid/admin?tab=locations` });
     if ((deviceModels ?? []).length === 0) missing.push({ key: 'models', label: 'Models', href: `/sites/${siteId}/sid/admin?tab=devices` });
     if ((cpuModels ?? []).length === 0) missing.push({ key: 'cpuModels', label: 'CPU Models', href: `/sites/${siteId}/sid/admin?tab=cpus` });
     if ((passwordTypes ?? []).length === 0) missing.push({ key: 'passwordTypes', label: 'Password Types', href: `/sites/${siteId}/sid/admin?tab=passwordTypes` });
@@ -1312,7 +1317,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
   }
 
   return (
-    <div className="pt-4 space-y-6 mx-auto w-full max-w-6xl">
+    <div className="pt-4 pb-12 space-y-6 mx-auto w-full max-w-6xl">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <Button
@@ -2527,7 +2532,9 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                                     disabled={!canModify || (isCreate && !createPrereqsReady)}
                                     aria-label={`Remove Extra IP ${idx + 1}`}
                                     onClick={() => {
-                                      setExtraIps((prev) => (Array.isArray(prev) ? prev.filter((_, i) => i !== idx) : []));
+                                      const label = `Extra IP ${idx + 1}`;
+                                      const ipText = String(value ?? '').trim();
+                                      setPendingExtraIpRemoval({ index: idx, label, ipText });
                                     }}
                                   >
                                     <Trash2 className="h-4 w-4" />
@@ -2764,6 +2771,38 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
               disabled={deleteLoading}
             >
               {deleteLoading ? 'Deleting…' : 'Delete SID'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={pendingExtraIpRemoval !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingExtraIpRemoval(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm removal</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingExtraIpRemoval?.ipText
+                ? `Remove ${pendingExtraIpRemoval.label} (${pendingExtraIpRemoval.ipText}) from this SID?`
+                : `Remove ${pendingExtraIpRemoval?.label ?? 'this Extra IP'} from this SID?`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                const pending = pendingExtraIpRemoval;
+                setPendingExtraIpRemoval(null);
+                if (!pending) return;
+                setExtraIps((prev) => (Array.isArray(prev) ? prev.filter((_, i) => i !== pending.index) : []));
+              }}
+            >
+              Remove
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -27,6 +27,7 @@ export interface SiteLocation {
   suite?: string | null;
   row?: string | null;
   rack?: string | null;
+  rack_size_u?: number | null;
   area?: string | null;
   label?: string | null;
   effective_label?: string | null;

@@ -82,10 +82,12 @@ const SiteSidAdminPage: React.FC = () => {
   const [editDialog, setEditDialog] = React.useState<null | PicklistKind>(null);
   const [editRowId, setEditRowId] = React.useState<number | null>(null);
   const [pendingUpdate, setPendingUpdate] = React.useState<null | { kind: PicklistKind; rowId: number; payload: any; usageCount: number }>(null);
+  const [pendingDelete, setPendingDelete] = React.useState<null | { kind: PicklistKind; rowId: number; label: string; usageCount: number }>(null);
 
   const [newTypeName, setNewTypeName] = React.useState('');
   const [newDeviceManufacturer, setNewDeviceManufacturer] = React.useState('');
   const [newDeviceName, setNewDeviceName] = React.useState('');
+  const [newDeviceRackU, setNewDeviceRackU] = React.useState('');
   const [newDeviceIsSwitch, setNewDeviceIsSwitch] = React.useState(false);
   const [newDeviceDefaultSwitchPortCount, setNewDeviceDefaultSwitchPortCount] = React.useState('');
   const [newDeviceIsPatchPanel, setNewDeviceIsPatchPanel] = React.useState(false);
@@ -105,6 +107,7 @@ const SiteSidAdminPage: React.FC = () => {
   const [editTypeName, setEditTypeName] = React.useState('');
   const [editDeviceManufacturer, setEditDeviceManufacturer] = React.useState('');
   const [editDeviceName, setEditDeviceName] = React.useState('');
+  const [editDeviceRackU, setEditDeviceRackU] = React.useState('');
   const [editDeviceIsSwitch, setEditDeviceIsSwitch] = React.useState(false);
   const [editDeviceDefaultSwitchPortCount, setEditDeviceDefaultSwitchPortCount] = React.useState('');
   const [editDeviceIsPatchPanel, setEditDeviceIsPatchPanel] = React.useState(false);
@@ -159,6 +162,7 @@ const SiteSidAdminPage: React.FC = () => {
     } else if (kind === 'deviceModel') {
       setEditDeviceManufacturer(String(row.manufacturer ?? ''));
       setEditDeviceName(String(row.name ?? ''));
+      setEditDeviceRackU(row.rack_u != null ? String(row.rack_u) : '');
       setEditDeviceIsSwitch(Boolean(row.is_switch));
       setEditDeviceDefaultSwitchPortCount(
         row.default_switch_port_count != null ? String(row.default_switch_port_count) : ''
@@ -268,19 +272,8 @@ const SiteSidAdminPage: React.FC = () => {
     }
   };
 
-  const deleteType = async (id: number) => {
-    if (!requireAdmin()) return;
-    try {
-      setBusy(true);
-      setOpError(null);
-      const resp = await apiClient.deleteSiteSidType(siteId, id);
-      if (!resp.success) throw new Error(resp.error || 'Failed to delete type');
-      await load();
-    } catch (e) {
-      setOpError(e instanceof Error ? e.message : 'Failed to delete type');
-    } finally {
-      setBusy(false);
-    }
+  const deleteType = async (id: number, label: string) => {
+    await requestPicklistDelete('sidType', id, label);
   };
 
   const createDeviceModel = async () => {
@@ -288,10 +281,17 @@ const SiteSidAdminPage: React.FC = () => {
     const name = newDeviceName.trim();
     const defaultPortCount = Number(newDeviceDefaultSwitchPortCount);
     const defaultPatchPanelPortCount = Number(newDeviceDefaultPatchPanelPortCount);
+    const rackUText = newDeviceRackU.trim();
+    const rackUNumber = Number(rackUText);
     if (!name) {
       setOpError('Name is required');
       return;
     }
+    if (rackUText !== '' && (!Number.isFinite(rackUNumber) || !Number.isInteger(rackUNumber) || rackUNumber <= 0 || rackUNumber > 99)) {
+      setOpError('Rack U must be a whole number between 1 and 99');
+      return;
+    }
+    const rackU = rackUText === '' ? null : rackUNumber;
     if (newDeviceIsSwitch && (!Number.isFinite(defaultPortCount) || defaultPortCount <= 0 || defaultPortCount > 4096)) {
       setOpError('Switch port count must be 1-4096');
       return;
@@ -307,6 +307,7 @@ const SiteSidAdminPage: React.FC = () => {
       const resp = await apiClient.createSiteSidDeviceModel(siteId, {
         manufacturer: newDeviceManufacturer.trim() || null,
         name,
+        rack_u: rackU,
         is_switch: newDeviceIsSwitch,
         default_switch_port_count: newDeviceIsSwitch ? defaultPortCount : null,
         is_patch_panel: newDeviceIsPatchPanel,
@@ -315,6 +316,7 @@ const SiteSidAdminPage: React.FC = () => {
       if (!resp.success) throw new Error(resp.error || 'Failed to create device model');
       setNewDeviceManufacturer('');
       setNewDeviceName('');
+      setNewDeviceRackU('');
       setNewDeviceIsSwitch(false);
       setNewDeviceDefaultSwitchPortCount('');
       setNewDeviceIsPatchPanel(false);
@@ -328,19 +330,8 @@ const SiteSidAdminPage: React.FC = () => {
     }
   };
 
-  const deleteDeviceModel = async (id: number) => {
-    if (!requireAdmin()) return;
-    try {
-      setBusy(true);
-      setOpError(null);
-      const resp = await apiClient.deleteSiteSidDeviceModel(siteId, id);
-      if (!resp.success) throw new Error(resp.error || 'Failed to delete device model');
-      await load();
-    } catch (e) {
-      setOpError(e instanceof Error ? e.message : 'Failed to delete device model');
-    } finally {
-      setBusy(false);
-    }
+  const deleteDeviceModel = async (id: number, label: string) => {
+    await requestPicklistDelete('deviceModel', id, label);
   };
 
   const createCpuModel = async () => {
@@ -384,19 +375,8 @@ const SiteSidAdminPage: React.FC = () => {
     }
   };
 
-  const deleteCpuModel = async (id: number) => {
-    if (!requireAdmin()) return;
-    try {
-      setBusy(true);
-      setOpError(null);
-      const resp = await apiClient.deleteSiteSidCpuModel(siteId, id);
-      if (!resp.success) throw new Error(resp.error || 'Failed to delete CPU model');
-      await load();
-    } catch (e) {
-      setOpError(e instanceof Error ? e.message : 'Failed to delete CPU model');
-    } finally {
-      setBusy(false);
-    }
+  const deleteCpuModel = async (id: number, label: string) => {
+    await requestPicklistDelete('cpuModel', id, label);
   };
 
   const createPlatform = async () => {
@@ -445,19 +425,8 @@ const SiteSidAdminPage: React.FC = () => {
     }
   };
 
-  const deleteStatus = async (id: number) => {
-    if (!requireAdmin()) return;
-    try {
-      setBusy(true);
-      setOpError(null);
-      const resp = await apiClient.deleteSiteSidStatus(siteId, id);
-      if (!resp.success) throw new Error(resp.error || 'Failed to delete status');
-      await load();
-    } catch (e) {
-      setOpError(e instanceof Error ? e.message : 'Failed to delete status');
-    } finally {
-      setBusy(false);
-    }
+  const deleteStatus = async (id: number, label: string) => {
+    await requestPicklistDelete('status', id, label);
   };
 
   const createPasswordType = async () => {
@@ -483,34 +452,12 @@ const SiteSidAdminPage: React.FC = () => {
     }
   };
 
-  const deletePasswordType = async (id: number) => {
-    if (!requireAdmin()) return;
-    try {
-      setBusy(true);
-      setOpError(null);
-      const resp = await apiClient.deleteSiteSidPasswordType(siteId, id);
-      if (!resp.success) throw new Error(resp.error || 'Failed to delete password type');
-      await load();
-    } catch (e) {
-      setOpError(e instanceof Error ? e.message : 'Failed to delete password type');
-    } finally {
-      setBusy(false);
-    }
+  const deletePasswordType = async (id: number, label: string) => {
+    await requestPicklistDelete('passwordType', id, label);
   };
 
-  const deletePlatform = async (id: number) => {
-    if (!requireAdmin()) return;
-    try {
-      setBusy(true);
-      setOpError(null);
-      const resp = await apiClient.deleteSiteSidPlatform(siteId, id);
-      if (!resp.success) throw new Error(resp.error || 'Failed to delete platform');
-      await load();
-    } catch (e) {
-      setOpError(e instanceof Error ? e.message : 'Failed to delete platform');
-    } finally {
-      setBusy(false);
-    }
+  const deletePlatform = async (id: number, label: string) => {
+    await requestPicklistDelete('platform', id, label);
   };
 
   const createVlan = async () => {
@@ -542,19 +489,8 @@ const SiteSidAdminPage: React.FC = () => {
     }
   };
 
-  const deleteVlan = async (id: number) => {
-    if (!requireAdmin()) return;
-    try {
-      setBusy(true);
-      setOpError(null);
-      const resp = await apiClient.deleteSiteSidVlan(siteId, id);
-      if (!resp.success) throw new Error(resp.error || 'Failed to delete VLAN');
-      await load();
-    } catch (e) {
-      setOpError(e instanceof Error ? e.message : 'Failed to delete VLAN');
-    } finally {
-      setBusy(false);
-    }
+  const deleteVlan = async (id: number, label: string) => {
+    await requestPicklistDelete('vlan', id, label);
   };
 
   const createNicType = async () => {
@@ -580,19 +516,8 @@ const SiteSidAdminPage: React.FC = () => {
     }
   };
 
-  const deleteNicType = async (id: number) => {
-    if (!requireAdmin()) return;
-    try {
-      setBusy(true);
-      setOpError(null);
-      const resp = await apiClient.deleteSiteSidNicType(siteId, id);
-      if (!resp.success) throw new Error(resp.error || 'Failed to delete NIC type');
-      await load();
-    } catch (e) {
-      setOpError(e instanceof Error ? e.message : 'Failed to delete NIC type');
-    } finally {
-      setBusy(false);
-    }
+  const deleteNicType = async (id: number, label: string) => {
+    await requestPicklistDelete('nicType', id, label);
   };
 
   const createNicSpeed = async () => {
@@ -618,19 +543,8 @@ const SiteSidAdminPage: React.FC = () => {
     }
   };
 
-  const deleteNicSpeed = async (id: number) => {
-    if (!requireAdmin()) return;
-    try {
-      setBusy(true);
-      setOpError(null);
-      const resp = await apiClient.deleteSiteSidNicSpeed(siteId, id);
-      if (!resp.success) throw new Error(resp.error || 'Failed to delete NIC speed');
-      await load();
-    } catch (e) {
-      setOpError(e instanceof Error ? e.message : 'Failed to delete NIC speed');
-    } finally {
-      setBusy(false);
-    }
+  const deleteNicSpeed = async (id: number, label: string) => {
+    await requestPicklistDelete('nicSpeed', id, label);
   };
 
   const getPicklistUsageCount = async (kind: PicklistKind, rowId: number): Promise<number> => {
@@ -736,6 +650,56 @@ const SiteSidAdminPage: React.FC = () => {
     await performPicklistUpdate(kind, rowId, payload);
   };
 
+  const performPicklistDelete = async (kind: PicklistKind, rowId: number) => {
+    if (!requireAdmin()) return;
+
+    try {
+      setBusy(true);
+      setOpError(null);
+
+      if (kind === 'sidType') {
+        const resp = await apiClient.deleteSiteSidType(siteId, rowId);
+        if (!resp.success) throw new Error(resp.error || 'Failed to delete SID type');
+      } else if (kind === 'deviceModel') {
+        const resp = await apiClient.deleteSiteSidDeviceModel(siteId, rowId);
+        if (!resp.success) throw new Error(resp.error || 'Failed to delete device model');
+      } else if (kind === 'cpuModel') {
+        const resp = await apiClient.deleteSiteSidCpuModel(siteId, rowId);
+        if (!resp.success) throw new Error(resp.error || 'Failed to delete CPU model');
+      } else if (kind === 'platform') {
+        const resp = await apiClient.deleteSiteSidPlatform(siteId, rowId);
+        if (!resp.success) throw new Error(resp.error || 'Failed to delete platform');
+      } else if (kind === 'status') {
+        const resp = await apiClient.deleteSiteSidStatus(siteId, rowId);
+        if (!resp.success) throw new Error(resp.error || 'Failed to delete status');
+      } else if (kind === 'passwordType') {
+        const resp = await apiClient.deleteSiteSidPasswordType(siteId, rowId);
+        if (!resp.success) throw new Error(resp.error || 'Failed to delete password type');
+      } else if (kind === 'vlan') {
+        const resp = await apiClient.deleteSiteSidVlan(siteId, rowId);
+        if (!resp.success) throw new Error(resp.error || 'Failed to delete VLAN');
+      } else if (kind === 'nicType') {
+        const resp = await apiClient.deleteSiteSidNicType(siteId, rowId);
+        if (!resp.success) throw new Error(resp.error || 'Failed to delete NIC type');
+      } else if (kind === 'nicSpeed') {
+        const resp = await apiClient.deleteSiteSidNicSpeed(siteId, rowId);
+        if (!resp.success) throw new Error(resp.error || 'Failed to delete NIC speed');
+      }
+
+      await load();
+    } catch (e) {
+      setOpError(e instanceof Error ? e.message : 'Failed to delete');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const requestPicklistDelete = async (kind: PicklistKind, rowId: number, label: string) => {
+    if (!requireAdmin()) return;
+    const usage = await getPicklistUsageCount(kind, rowId);
+    setPendingDelete({ kind, rowId, label, usageCount: usage });
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8">
@@ -835,7 +799,7 @@ const SiteSidAdminPage: React.FC = () => {
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" onClick={() => deleteType(t.id)} disabled={!canAdmin || busy}>
+                        <Button variant="ghost" onClick={() => deleteType(t.id, String(t.name ?? 'SID Type'))} disabled={!canAdmin || busy}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </TableCell>
@@ -856,6 +820,7 @@ const SiteSidAdminPage: React.FC = () => {
                   setOpError(null);
                   setNewDeviceManufacturer('');
                   setNewDeviceName('');
+                  setNewDeviceRackU('');
                   setNewDeviceIsSwitch(false);
                   setNewDeviceDefaultSwitchPortCount('');
                   setNewDeviceIsPatchPanel(false);
@@ -873,6 +838,7 @@ const SiteSidAdminPage: React.FC = () => {
                   <TableRow>
                     <TableHead>Manufacturer</TableHead>
                     <TableHead>Name</TableHead>
+                    <TableHead>Rack U</TableHead>
                     <TableHead>Switch Model</TableHead>
                     <TableHead>Switch Ports</TableHead>
                     <TableHead>Patch Panel</TableHead>
@@ -885,6 +851,7 @@ const SiteSidAdminPage: React.FC = () => {
                     <TableRow key={m.id}>
                       <TableCell>{m.manufacturer || '—'}</TableCell>
                       <TableCell className="font-medium">{m.name}</TableCell>
+                      <TableCell>{m.rack_u ?? '—'}</TableCell>
                       <TableCell>{Boolean(m.is_switch) ? 'Yes' : 'No'}</TableCell>
                       <TableCell>{Boolean(m.is_switch) ? (m.default_switch_port_count ?? '—') : '—'}</TableCell>
                       <TableCell>{Boolean(m.is_patch_panel) ? 'Yes' : 'No'}</TableCell>
@@ -897,7 +864,7 @@ const SiteSidAdminPage: React.FC = () => {
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" onClick={() => deleteDeviceModel(m.id)} disabled={!canAdmin || busy}>
+                        <Button variant="ghost" onClick={() => deleteDeviceModel(m.id, String(m.name ?? 'Device Model'))} disabled={!canAdmin || busy}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </TableCell>
@@ -949,7 +916,7 @@ const SiteSidAdminPage: React.FC = () => {
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" onClick={() => deleteCpuModel(m.id)} disabled={!canAdmin || busy}>
+                        <Button variant="ghost" onClick={() => deleteCpuModel(m.id, String(m.name ?? 'CPU Model'))} disabled={!canAdmin || busy}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </TableCell>
@@ -996,7 +963,7 @@ const SiteSidAdminPage: React.FC = () => {
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" onClick={() => deletePlatform(p.id)} disabled={!canAdmin || busy}>
+                        <Button variant="ghost" onClick={() => deletePlatform(p.id, String(p.name ?? 'Platform'))} disabled={!canAdmin || busy}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </TableCell>
@@ -1050,7 +1017,7 @@ const SiteSidAdminPage: React.FC = () => {
                           variant="ghost"
                           onClick={() => {
                             if (String(s?.name ?? '').trim().toLowerCase() === 'deleted') return;
-                            deleteStatus(s.id);
+                            deleteStatus(s.id, String(s.name ?? 'Status'));
                           }}
                           disabled={!canAdmin || busy}
                         >
@@ -1115,7 +1082,7 @@ const SiteSidAdminPage: React.FC = () => {
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" onClick={() => deletePasswordType(t.id)} disabled={!canAdmin || busy}>
+                        <Button variant="ghost" onClick={() => deletePasswordType(t.id, String(t.name ?? 'Password Type'))} disabled={!canAdmin || busy}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </TableCell>
@@ -1165,7 +1132,14 @@ const SiteSidAdminPage: React.FC = () => {
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" onClick={() => deleteVlan(v.id)} disabled={!canAdmin || busy}>
+                        <Button
+                          variant="ghost"
+                          onClick={() => {
+                            const vlanLabel = `${String(v.vlan_id ?? '').trim() || 'VLAN'}${String(v.name ?? '').trim() ? ` (${String(v.name ?? '').trim()})` : ''}`;
+                            deleteVlan(v.id, vlanLabel);
+                          }}
+                          disabled={!canAdmin || busy}
+                        >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </TableCell>
@@ -1212,7 +1186,7 @@ const SiteSidAdminPage: React.FC = () => {
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" onClick={() => deleteNicType(t.id)} disabled={!canAdmin || busy}>
+                        <Button variant="ghost" onClick={() => deleteNicType(t.id, String(t.name ?? 'NIC Type'))} disabled={!canAdmin || busy}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </TableCell>
@@ -1259,7 +1233,7 @@ const SiteSidAdminPage: React.FC = () => {
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" onClick={() => deleteNicSpeed(t.id)} disabled={!canAdmin || busy}>
+                        <Button variant="ghost" onClick={() => deleteNicSpeed(t.id, String(t.name ?? 'NIC Speed'))} disabled={!canAdmin || busy}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </TableCell>
@@ -1329,6 +1303,19 @@ const SiteSidAdminPage: React.FC = () => {
                   value={editDeviceName}
                   onChange={(e) => setEditDeviceName(e.target.value)}
                   disabled={!canAdmin || busy}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-device-rack-u">Rack U</Label>
+                <Input
+                  id="edit-device-rack-u"
+                  type="number"
+                  min={1}
+                  max={99}
+                  value={editDeviceRackU}
+                  onChange={(e) => setEditDeviceRackU(e.target.value)}
+                  disabled={!canAdmin || busy}
+                  placeholder="e.g., 1"
                 />
               </div>
               <div className="flex items-center justify-between rounded-md border p-3">
@@ -1545,10 +1532,17 @@ const SiteSidAdminPage: React.FC = () => {
                   const name = editDeviceName.trim();
                   const defaultPortCount = Number(editDeviceDefaultSwitchPortCount);
                   const defaultPatchPanelPortCount = Number(editDeviceDefaultPatchPanelPortCount);
+                  const rackUText = editDeviceRackU.trim();
+                  const rackUNumber = Number(rackUText);
                   if (!name) {
                     setOpError('Name is required');
                     return;
                   }
+                  if (rackUText !== '' && (!Number.isFinite(rackUNumber) || !Number.isInteger(rackUNumber) || rackUNumber <= 0 || rackUNumber > 99)) {
+                    setOpError('Rack U must be a whole number between 1 and 99');
+                    return;
+                  }
+                  const rackU = rackUText === '' ? null : rackUNumber;
                   if (editDeviceIsSwitch && (!Number.isFinite(defaultPortCount) || defaultPortCount <= 0 || defaultPortCount > 4096)) {
                     setOpError('Switch port count must be 1-4096');
                     return;
@@ -1560,6 +1554,7 @@ const SiteSidAdminPage: React.FC = () => {
                   await requestPicklistUpdate('deviceModel', editRowId, {
                     manufacturer: editDeviceManufacturer.trim() || null,
                     name,
+                    rack_u: rackU,
                     is_switch: editDeviceIsSwitch,
                     default_switch_port_count: editDeviceIsSwitch ? defaultPortCount : null,
                     is_patch_panel: editDeviceIsPatchPanel,
@@ -1669,6 +1664,35 @@ const SiteSidAdminPage: React.FC = () => {
         </AlertDialogContent>
       </AlertDialog>
 
+      <AlertDialog open={pendingDelete !== null} onOpenChange={(open) => !open && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm deletion</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete "{pendingDelete?.label ?? 'this picklist value'}"?
+              {` `}
+              {Number(pendingDelete?.usageCount ?? 0) > 0
+                ? `This will remove it from ${pendingDelete?.usageCount ?? 0} SIDs.`
+                : 'It is not currently used by any SIDs.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy}
+              onClick={async (e) => {
+                e.preventDefault();
+                if (!pendingDelete) return;
+                await performPicklistDelete(pendingDelete.kind, pendingDelete.rowId);
+                setPendingDelete(null);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <Dialog open={addDialog !== null} onOpenChange={(open) => !open && closeAddDialog()}>
         <DialogContent>
           <DialogHeader>
@@ -1749,6 +1773,19 @@ const SiteSidAdminPage: React.FC = () => {
                   onChange={(e) => setNewDeviceName(e.target.value)}
                   disabled={!canAdmin || busy}
                   placeholder="e.g., R740"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="add-device-rack-u">Rack U</Label>
+                <Input
+                  id="add-device-rack-u"
+                  type="number"
+                  min={1}
+                  max={99}
+                  value={newDeviceRackU}
+                  onChange={(e) => setNewDeviceRackU(e.target.value)}
+                  disabled={!canAdmin || busy}
+                  placeholder="e.g., 1"
                 />
               </div>
               <div className="flex items-center justify-between rounded-md border p-3">

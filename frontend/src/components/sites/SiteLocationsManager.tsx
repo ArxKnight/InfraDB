@@ -54,6 +54,7 @@ const SiteLocationsManager: React.FC<SiteLocationsManagerProps> = ({ siteId, sit
       suite?: string;
       row?: string;
       rack?: string;
+      rack_size_u?: number | null;
       area?: string;
     };
   } | null>(null);
@@ -72,6 +73,7 @@ const SiteLocationsManager: React.FC<SiteLocationsManagerProps> = ({ siteId, sit
   const [suite, setSuite] = useState('');
   const [row, setRow] = useState('');
   const [rack, setRack] = useState('');
+  const [rackSizeU, setRackSizeU] = useState('');
   const [area, setArea] = useState('');
 
   const sortedLocations = useMemo(() => {
@@ -107,6 +109,7 @@ const SiteLocationsManager: React.FC<SiteLocationsManagerProps> = ({ siteId, sit
     setSuite('');
     setRow('');
     setRack('');
+    setRackSizeU('');
     setArea('');
   };
 
@@ -145,6 +148,7 @@ const SiteLocationsManager: React.FC<SiteLocationsManagerProps> = ({ siteId, sit
     setSuite(String(loc.suite ?? ''));
     setRow(String(loc.row ?? ''));
     setRack(String(loc.rack ?? ''));
+    setRackSizeU(loc.rack_size_u != null ? String(loc.rack_size_u) : '');
     setArea(String(loc.area ?? ''));
   };
 
@@ -157,6 +161,8 @@ const SiteLocationsManager: React.FC<SiteLocationsManagerProps> = ({ siteId, sit
     const suiteV = suite.trim();
     const rowV = row.trim();
     const rackV = rack.trim();
+    const rackSizeUText = rackSizeU.trim();
+    const rackSizeUValue = rackSizeUText === '' ? null : Number(rackSizeUText);
     const areaV = area.trim();
 
     return {
@@ -170,11 +176,13 @@ const SiteLocationsManager: React.FC<SiteLocationsManagerProps> = ({ siteId, sit
             suite: '',
             row: '',
             rack: '',
+            rack_size_u: rackSizeUValue,
           }
         : {
             suite: suiteV,
             row: rowV,
             rack: rackV,
+            rack_size_u: rackSizeUValue,
             area: '',
           }),
     };
@@ -185,6 +193,8 @@ const SiteLocationsManager: React.FC<SiteLocationsManagerProps> = ({ siteId, sit
     const suiteV = suite.trim();
     const rowV = row.trim();
     const rackV = rack.trim();
+    const rackSizeUText = rackSizeU.trim();
+    const rackSizeUValue = Number(rackSizeUText);
     const areaV = area.trim();
 
     if (!floorV) {
@@ -192,9 +202,18 @@ const SiteLocationsManager: React.FC<SiteLocationsManagerProps> = ({ siteId, sit
       return;
     }
 
+    if (rackSizeUText !== '' && (!Number.isFinite(rackSizeUValue) || !Number.isInteger(rackSizeUValue) || rackSizeUValue <= 0 || rackSizeUValue > 99)) {
+      setError('Rack Size (U), when provided, must be a whole number between 1 and 99.');
+      return;
+    }
+
     if (templateType === 'DATACENTRE') {
       if (!suiteV || !rowV || !rackV) {
         setError('Suite, Row, and Rack are required for Datacentre/Commercial locations.');
+        return;
+      }
+      if (!Number.isFinite(rackSizeUValue) || !Number.isInteger(rackSizeUValue) || rackSizeUValue <= 0 || rackSizeUValue > 99) {
+        setError('Rack Size (U) is required and must be a whole number between 1 and 99.');
         return;
       }
     } else {
@@ -228,11 +247,15 @@ const SiteLocationsManager: React.FC<SiteLocationsManagerProps> = ({ siteId, sit
           label: label.trim() || undefined,
           floor: floorV,
           ...(templateType === 'DOMESTIC'
-            ? { area: areaV }
+            ? {
+                area: areaV,
+                ...(rackSizeUText !== '' ? { rack_size_u: rackSizeUValue } : {}),
+              }
             : {
                 suite: suiteV,
                 row: rowV,
                 rack: rackV,
+                rack_size_u: rackSizeUValue,
               }),
         });
         if (!resp.success) throw new Error(resp.error || 'Failed to create location');
@@ -426,6 +449,7 @@ const SiteLocationsManager: React.FC<SiteLocationsManagerProps> = ({ siteId, sit
                       setSuite('');
                       setRow('');
                       setRack('');
+                      setRackSizeU('');
                     } else {
                       setArea('');
                     }
@@ -450,6 +474,19 @@ const SiteLocationsManager: React.FC<SiteLocationsManagerProps> = ({ siteId, sit
               <div className="space-y-1">
                 <Label>Floor</Label>
                 <Input value={floor} onChange={(e) => setFloor(e.target.value)} placeholder="e.g., 1" disabled={working} />
+              </div>
+
+              <div className="space-y-1">
+                <Label>Rack Size (U) {templateType === 'DATACENTRE' ? '' : '(Optional)'}</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={99}
+                  value={rackSizeU}
+                  onChange={(e) => setRackSizeU(e.target.value)}
+                  placeholder="e.g., 42"
+                  disabled={working}
+                />
               </div>
 
               {templateType === 'DOMESTIC' ? (

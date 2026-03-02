@@ -31,6 +31,7 @@ export interface CreateSiteLocationData {
   suite?: string | null;
   row?: string | null;
   rack?: string | null;
+  rack_size_u?: number | null;
   area?: string | null;
   label?: string | null;
 }
@@ -41,6 +42,7 @@ export interface UpdateSiteLocationData {
   suite?: string | null;
   row?: string | null;
   rack?: string | null;
+  rack_size_u?: number | null;
   area?: string | null;
   label?: string | null;
 }
@@ -60,6 +62,7 @@ export class SiteLocationModel {
          sl.suite,
          sl.\`row\` as \`row\`,
          sl.rack,
+         sl.rack_size_u,
          sl.area,
          sl.label,
          COALESCE(NULLIF(TRIM(sl.label), ''), s.code) AS effective_label,
@@ -92,6 +95,7 @@ export class SiteLocationModel {
          sl.suite,
          sl.\`row\` as \`row\`,
          sl.rack,
+         sl.rack_size_u,
          sl.area,
          sl.label,
          COALESCE(NULLIF(TRIM(sl.label), ''), s.code) AS effective_label,
@@ -126,6 +130,7 @@ export class SiteLocationModel {
            sl.suite,
            sl.\`row\` as \`row\`,
            sl.rack,
+           sl.rack_size_u,
            sl.area,
            sl.label,
            COALESCE(NULLIF(TRIM(sl.label), ''), s.code) AS effective_label,
@@ -151,6 +156,7 @@ export class SiteLocationModel {
          sl.suite,
          sl.\`row\` as \`row\`,
          sl.rack,
+         sl.rack_size_u,
          sl.area,
          sl.label,
          COALESCE(NULLIF(TRIM(sl.label), ''), s.code) AS effective_label,
@@ -294,6 +300,7 @@ export class SiteLocationModel {
          sl.suite,
          sl.\`row\` as \`row\`,
          sl.rack,
+         sl.rack_size_u,
          sl.area,
          sl.label,
          COALESCE(NULLIF(TRIM(sl.label), ''), s.code) AS effective_label,
@@ -319,6 +326,7 @@ export class SiteLocationModel {
          sl.suite,
          sl.\`row\` as \`row\`,
          sl.rack,
+         sl.rack_size_u,
          sl.area,
          sl.label,
          COALESCE(NULLIF(TRIM(sl.label), ''), s.code) AS effective_label,
@@ -351,6 +359,7 @@ export class SiteLocationModel {
       suite: templateType === 'DATACENTRE' ? (suite !== '' ? suite : null) : null,
       row: templateType === 'DATACENTRE' ? (row !== '' ? row : null) : null,
       rack: templateType === 'DATACENTRE' ? (rack !== '' ? rack : null) : null,
+      rack_size_u: data.rack_size_u ?? null,
       area: templateType === 'DOMESTIC' ? (area !== '' ? area : null) : null,
       label: labelTrimmed !== '' ? labelTrimmed : null,
     };
@@ -363,6 +372,9 @@ export class SiteLocationModel {
       if (!payload.suite || !payload.row || !payload.rack) {
         throw new Error('Suite, Row, and Rack are required for Datacentre/Commercial locations');
       }
+      if (!Number.isFinite(Number(payload.rack_size_u)) || Number(payload.rack_size_u) <= 0) {
+        throw new Error('Rack Size (U) is required for Datacentre/Commercial locations');
+      }
     } else {
       if (!payload.area) {
         throw new Error('Area is required for Domestic locations');
@@ -372,8 +384,8 @@ export class SiteLocationModel {
     let result: { insertId?: number; affectedRows: number };
     try {
       result = await this.adapter.execute(
-        `INSERT INTO site_locations (site_id, template_type, floor, suite, \`row\`, rack, area, label)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO site_locations (site_id, template_type, floor, suite, \`row\`, rack, rack_size_u, area, label)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           payload.site_id,
           payload.template_type,
@@ -381,6 +393,7 @@ export class SiteLocationModel {
           payload.suite,
           payload.row,
           payload.rack,
+          payload.rack_size_u,
           payload.area,
           payload.label,
         ]
@@ -478,6 +491,11 @@ export class SiteLocationModel {
     if (data.rack !== undefined) {
       updates.push('rack = ?');
       values.push(data.rack ? String(data.rack).trim() : null);
+    }
+
+    if (data.rack_size_u !== undefined) {
+      updates.push('rack_size_u = ?');
+      values.push(data.rack_size_u ?? null);
     }
 
     if (data.area !== undefined) {
