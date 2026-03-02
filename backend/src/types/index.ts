@@ -71,6 +71,9 @@ export interface Label {
   destination?: string;
   notes?: string;
   zpl_content?: string;
+  via_patch_panel?: boolean;
+  patch_panel_sid_id?: number | null;
+  patch_panel_port?: number | null;
 }
 
 export interface SiteMembership {

@@ -138,7 +138,11 @@ const SiteSidIndexPage: React.FC = () => {
     const floor = withPrefix('FL', floorRaw);
     const suite = withPrefix('S', suiteRaw);
     const row = withPrefix('ROW', rowRaw);
-    const rack = withPrefix('R', rackRaw);
+    const rackWithoutRackSize = rackRaw
+      .replace(/\s*\|\s*Rack\s*Size\s*:\s*[^|]+/gi, '')
+      .replace(/\s*Rack\s*Size\s*:\s*\d+\s*U\s*$/gi, '')
+      .trim();
+    const rack = withPrefix('R', rackWithoutRackSize);
 
     const isDomestic = template === 'DOMESTIC' || (area !== '' && suite === '' && row === '' && rack === '');
     if (isDomestic) {

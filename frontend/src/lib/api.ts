@@ -870,7 +870,18 @@ class ApiClient {
     return this.request<{ label: any }>(`/labels/${id}?site_id=${siteId}`);
   }
 
-  async createLabel(data: { source_location_id: number; destination_location_id: number; cable_type_id: number; site_id: number; quantity?: number; notes?: string; zpl_content?: string }) {
+  async createLabel(data: {
+    source_location_id: number;
+    destination_location_id: number;
+    cable_type_id: number;
+    site_id: number;
+    quantity?: number;
+    notes?: string;
+    zpl_content?: string;
+    via_patch_panel?: boolean;
+    patch_panel_sid_id?: number;
+    patch_panel_port?: number;
+  }) {
     return this.request<{ label: any; labels?: any[] }>('/labels', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -879,7 +890,17 @@ class ApiClient {
 
   async updateLabel(
     id: number,
-    data: { site_id: number; source_location_id?: number; destination_location_id?: number; cable_type_id?: number; notes?: string; zpl_content?: string }
+    data: {
+      site_id: number;
+      source_location_id?: number;
+      destination_location_id?: number;
+      cable_type_id?: number;
+      notes?: string;
+      zpl_content?: string;
+      via_patch_panel?: boolean;
+      patch_panel_sid_id?: number;
+      patch_panel_port?: number;
+    }
   ) {
     return this.request<{ label: any }>(`/labels/${id}`, {
       method: 'PUT',

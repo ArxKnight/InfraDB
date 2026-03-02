@@ -88,6 +88,13 @@ const LabelDetailsDialog: React.FC<LabelDetailsDialogProps> = ({
       destination_location_id: data.destination_location_id,
       cable_type_id: data.cable_type_id,
       notes: data.notes,
+      via_patch_panel: data.via_patch_panel,
+      ...(Number.isFinite(Number(data.patch_panel_sid_id)) && Number(data.patch_panel_sid_id) > 0
+        ? { patch_panel_sid_id: Number(data.patch_panel_sid_id) }
+        : {}),
+      ...(Number.isFinite(Number(data.patch_panel_port)) && Number(data.patch_panel_port) > 0
+        ? { patch_panel_port: Number(data.patch_panel_port) }
+        : {}),
     });
     if (!resp.success) throw new Error(resp.error || 'Failed to update label');
     onChanged();

@@ -23,6 +23,15 @@ function normalizeArea(value: unknown): string {
   return raw.replace(/\s+/g, ' ');
 }
 
+function stripRackSizeSegment(value: unknown): string {
+  const raw = safeText(value);
+  if (!raw) return '';
+  return raw
+    .replace(/\s*\|\s*Rack\s*Size\s*:\s*[^|]+/gi, '')
+    .replace(/\s*Rack\s*Size\s*:\s*\d+\s*U\s*$/gi, '')
+    .trim();
+}
+
 export function isDomesticLocation(loc: SiteLocation): boolean {
   const template = safeText((loc as any).template_type).toUpperCase();
   if (template === 'DOMESTIC') return true;
@@ -45,7 +54,7 @@ export function formatLocationFields(loc: SiteLocation): string {
 
   const suite = safeText(loc.suite);
   const row = safeText(loc.row);
-  const rack = safeText(loc.rack);
+  const rack = stripRackSizeSegment(loc.rack);
   return `Label: ${label} | Floor: ${floor} | Suite: ${suite} | Row: ${row} | Rack: ${rack}`;
 }
 
@@ -69,7 +78,7 @@ export function formatLocationPrint(loc: SiteLocation): string {
     return `${label}/${floor}/${area}`;
   }
 
-  return `${label}/${floor}/${safeText(loc.suite)}/${safeText(loc.row)}/${safeText(loc.rack)}`;
+  return `${label}/${floor}/${safeText(loc.suite)}/${safeText(loc.row)}/${stripRackSizeSegment(loc.rack)}`;
 }
 
 export function formatLocationWithPrefix(prefix: string, loc: SiteLocation): string {

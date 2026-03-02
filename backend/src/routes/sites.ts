@@ -261,6 +261,41 @@ function parseCommaSeparatedTerms(input: string): string[] {
   return out.slice(0, 50);
 }
 
+const SID_LOCATION_PATH_SQL = `CONCAT_WS('/',
+  COALESCE(NULLIF(TRIM(sl.label), ''), NULLIF(TRIM(si.code), '')),
+  CASE
+    WHEN NULLIF(TRIM(sl.floor), '') IS NULL THEN NULL
+    WHEN UPPER(TRIM(sl.floor)) LIKE 'FL%' THEN TRIM(sl.floor)
+    ELSE CONCAT('FL', TRIM(sl.floor))
+  END,
+  CASE
+    WHEN UPPER(TRIM(COALESCE(sl.template_type, ''))) = 'DOMESTIC' THEN NULLIF(TRIM(sl.area), '')
+    WHEN NULLIF(TRIM(sl.suite), '') IS NULL THEN NULL
+    WHEN UPPER(TRIM(sl.suite)) LIKE 'S%' THEN TRIM(sl.suite)
+    ELSE CONCAT('S', TRIM(sl.suite))
+  END,
+  CASE
+    WHEN UPPER(TRIM(COALESCE(sl.template_type, ''))) = 'DOMESTIC' THEN NULL
+    WHEN NULLIF(TRIM(sl.\`row\`), '') IS NULL THEN NULL
+    WHEN UPPER(TRIM(sl.\`row\`)) LIKE 'ROW%' THEN TRIM(sl.\`row\`)
+    ELSE CONCAT('ROW', TRIM(sl.\`row\`))
+  END,
+  CASE
+    WHEN UPPER(TRIM(COALESCE(sl.template_type, ''))) = 'DOMESTIC' THEN NULL
+    WHEN NULLIF(TRIM(sl.rack), '') IS NULL THEN NULL
+    WHEN UPPER(TRIM(sl.rack)) LIKE 'R%' THEN TRIM(sl.rack)
+    ELSE CONCAT('R', TRIM(sl.rack))
+  END
+)`;
+
+function normalizeLocationSearchTerm(input: string): string {
+  return input
+    .split('/')
+    .map((part) => part.trim())
+    .filter((part) => part !== '')
+    .join('/');
+}
+
 const createSidSchema = z.object({
   sid_type_id: z.coerce.number().int().positive(),
   device_model_id: z.coerce.number().int().positive().optional().nullable(),
@@ -765,6 +800,8 @@ router.get(
       if (search && search.trim() !== '') {
         const trimmedSearch = search.trim();
         const pattern = `%${trimmedSearch}%`;
+        const normalizedLocationSearch = normalizeLocationSearchTerm(trimmedSearch);
+        const locationPathPattern = `%${normalizedLocationSearch || trimmedSearch}%`;
 
         // Backwards-compatible behavior (no explicit search_field from older clients)
         if (!search_field) {
@@ -812,8 +849,8 @@ router.get(
           )`);
           params.push(pattern);
         } else if (search_field === 'location') {
-          where.push('(sl.label LIKE ? OR si.code LIKE ? OR sl.floor LIKE ? OR sl.suite LIKE ? OR sl.`row` LIKE ? OR sl.rack LIKE ? OR sl.area LIKE ?)');
-          params.push(pattern, pattern, pattern, pattern, pattern, pattern, pattern);
+          where.push(`(${SID_LOCATION_PATH_SQL} LIKE ? OR sl.label LIKE ? OR si.code LIKE ? OR sl.floor LIKE ? OR sl.suite LIKE ? OR sl.\`row\` LIKE ? OR sl.rack LIKE ? OR sl.area LIKE ?)`);
+          params.push(locationPathPattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern);
         } else {
           // search_field === 'any'
           where.push(`(
@@ -832,6 +869,7 @@ router.get(
             OR sl.\`row\` LIKE ?
             OR sl.rack LIKE ?
             OR sl.area LIKE ?
+            OR ${SID_LOCATION_PATH_SQL} LIKE ?
             OR EXISTS (
               SELECT 1
               FROM sid_nics sn
@@ -859,6 +897,7 @@ router.get(
             pattern,
             pattern,
             pattern,
+            locationPathPattern,
             pattern
           );
         }

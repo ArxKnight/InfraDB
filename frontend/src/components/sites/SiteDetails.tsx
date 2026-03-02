@@ -110,6 +110,13 @@ const SiteDetails: React.FC<SiteDetailsProps> = ({
         notes: data.notes,
         site_id: site.id,
         quantity: data.quantity,
+        via_patch_panel: data.via_patch_panel,
+        ...(Number.isFinite(Number(data.patch_panel_sid_id)) && Number(data.patch_panel_sid_id) > 0
+          ? { patch_panel_sid_id: Number(data.patch_panel_sid_id) }
+          : {}),
+        ...(Number.isFinite(Number(data.patch_panel_port)) && Number(data.patch_panel_port) > 0
+          ? { patch_panel_port: Number(data.patch_panel_port) }
+          : {}),
       });
 
       if (!resp.success || !resp.data?.label) {

@@ -65,6 +65,9 @@ export interface Label {
   destination_location?: SiteLocation | null;
   notes?: string;
   zpl_content?: string;
+  via_patch_panel?: boolean;
+  patch_panel_sid_id?: number | null;
+  patch_panel_port?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -82,6 +85,9 @@ export interface CreateLabelData {
   quantity?: number;
   notes?: string;
   zpl_content?: string;
+  via_patch_panel?: boolean;
+  patch_panel_sid_id?: number | null;
+  patch_panel_port?: number | null;
 }
 
 export interface UpdateLabelData {
@@ -90,6 +96,9 @@ export interface UpdateLabelData {
   cable_type_id?: number;
   notes?: string;
   zpl_content?: string;
+  via_patch_panel?: boolean;
+  patch_panel_sid_id?: number | null;
+  patch_panel_port?: number | null;
 }
 
 export interface LabelSearchParams {

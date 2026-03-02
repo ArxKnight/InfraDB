@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import LabelModel from '../models/Label.js';
 import SiteModel from '../models/Site.js';
+import connection from '../database/connection.js';
 import ZPLService from '../services/ZPLService.js';
 import { logActivity } from '../services/ActivityLogService.js';
 import { authenticateToken } from '../middleware/auth.js';
@@ -22,6 +23,26 @@ const createLabelSchema = z.object({
   notes: z.string().max(1000, 'Notes must be less than 1000 characters').optional(),
   zpl_content: z.string().optional(),
   quantity: z.coerce.number().int().min(1).max(500).optional(),
+  via_patch_panel: z.boolean().optional(),
+  patch_panel_sid_id: z.coerce.number().int().positive().optional(),
+  patch_panel_port: z.coerce.number().int().positive().optional(),
+}).superRefine((data, ctx) => {
+  if (data.via_patch_panel) {
+    if (!Number.isFinite(Number(data.patch_panel_sid_id)) || Number(data.patch_panel_sid_id) <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['patch_panel_sid_id'],
+        message: 'Patch panel is required when enabled',
+      });
+    }
+    if (!Number.isFinite(Number(data.patch_panel_port)) || Number(data.patch_panel_port) <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['patch_panel_port'],
+        message: 'Patch panel port is required when enabled',
+      });
+    }
+  }
 });
 
 const updateLabelSchema = z.object({
@@ -30,7 +51,83 @@ const updateLabelSchema = z.object({
   cable_type_id: z.coerce.number().min(1, 'Cable type is required').optional(),
   notes: z.string().max(1000, 'Notes must be less than 1000 characters').optional(),
   zpl_content: z.string().optional(),
+  via_patch_panel: z.boolean().optional(),
+  patch_panel_sid_id: z.coerce.number().int().positive().optional(),
+  patch_panel_port: z.coerce.number().int().positive().optional(),
 });
+
+async function normalizePatchPanelSelection(
+  siteId: number,
+  data: {
+    via_patch_panel?: boolean;
+    patch_panel_sid_id?: number | null;
+    patch_panel_port?: number | null;
+  }
+): Promise<{
+  via_patch_panel: boolean;
+  patch_panel_sid_id: number | null;
+  patch_panel_port: number | null;
+}> {
+  const viaPatchPanel = data.via_patch_panel === true;
+  if (!viaPatchPanel) {
+    return {
+      via_patch_panel: false,
+      patch_panel_sid_id: null,
+      patch_panel_port: null,
+    };
+  }
+
+  const patchPanelSidId = Number(data.patch_panel_sid_id ?? 0);
+  const patchPanelPort = Number(data.patch_panel_port ?? 0);
+
+  if (!Number.isFinite(patchPanelSidId) || patchPanelSidId < 1) {
+    throw new Error('Patch panel is required when enabled');
+  }
+  if (!Number.isFinite(patchPanelPort) || patchPanelPort < 1) {
+    throw new Error('Patch panel port is required when enabled');
+  }
+
+  const adapter = connection.getAdapter();
+  const rows = await adapter.query(
+    `SELECT
+       s.id,
+       s.switch_port_count,
+       dm.is_patch_panel,
+       dm.default_patch_panel_port_count
+     FROM sids s
+     LEFT JOIN sid_device_models dm ON dm.id = s.device_model_id
+     WHERE s.id = ? AND s.site_id = ?
+     LIMIT 1`,
+    [patchPanelSidId, siteId]
+  );
+  const row = (rows?.[0] as any) ?? null;
+  if (!row) {
+    throw new Error('Selected patch panel SID is invalid for this site');
+  }
+
+  const isPatchPanel = Number(row?.is_patch_panel ?? 0) === 1 || row?.is_patch_panel === true;
+  if (!isPatchPanel) {
+    throw new Error('Selected SID is not a patch panel');
+  }
+
+  const switchPortCount = Number(row?.switch_port_count ?? 0);
+  const defaultPatchPanelPortCount = Number(row?.default_patch_panel_port_count ?? 0);
+  const maxPorts = Number.isFinite(switchPortCount) && switchPortCount > 0
+    ? Math.floor(switchPortCount)
+    : (Number.isFinite(defaultPatchPanelPortCount) && defaultPatchPanelPortCount > 0
+      ? Math.floor(defaultPatchPanelPortCount)
+      : null);
+
+  if (maxPorts !== null && patchPanelPort > maxPorts) {
+    throw new Error(`Patch panel port must be between 1 and ${maxPorts}`);
+  }
+
+  return {
+    via_patch_panel: true,
+    patch_panel_sid_id: patchPanelSidId,
+    patch_panel_port: Math.floor(patchPanelPort),
+  };
+}
 
 const getLabelsQuerySchema = z.object({
   search: z.string().optional(),
@@ -350,6 +447,11 @@ router.post('/', authenticateToken, resolveSiteAccess(req => Number(req.body.sit
     // Validate request body
     const labelDataParsed = createLabelSchema.parse(req.body);
     const quantity = labelDataParsed.quantity ?? 1;
+    const patchPanelSelection = await normalizePatchPanelSelection(labelDataParsed.site_id, {
+      ...(labelDataParsed.via_patch_panel !== undefined ? { via_patch_panel: labelDataParsed.via_patch_panel } : {}),
+      ...(labelDataParsed.patch_panel_sid_id !== undefined ? { patch_panel_sid_id: labelDataParsed.patch_panel_sid_id } : {}),
+      ...(labelDataParsed.patch_panel_port !== undefined ? { patch_panel_port: labelDataParsed.patch_panel_port } : {}),
+    });
     const labelData = {
       site_id: labelDataParsed.site_id,
       source_location_id: labelDataParsed.source_location_id,
@@ -357,6 +459,7 @@ router.post('/', authenticateToken, resolveSiteAccess(req => Number(req.body.sit
       cable_type_id: labelDataParsed.cable_type_id,
       ...(labelDataParsed.notes ? { notes: labelDataParsed.notes } : {}),
       ...(labelDataParsed.zpl_content ? { zpl_content: labelDataParsed.zpl_content } : {}),
+      ...patchPanelSelection,
     };
 
     // Create label(s)
@@ -455,6 +558,19 @@ router.post('/', authenticateToken, resolveSiteAccess(req => Number(req.body.sit
           error: error.message,
         } as ApiResponse);
       }
+
+      if (
+        error.message === 'Patch panel is required when enabled' ||
+        error.message === 'Patch panel port is required when enabled' ||
+        error.message === 'Selected patch panel SID is invalid for this site' ||
+        error.message === 'Selected SID is not a patch panel' ||
+        error.message.startsWith('Patch panel port must be between 1 and ')
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: error.message,
+        } as ApiResponse);
+      }
       
       if (error.message === 'Site not found') {
         return res.status(400).json({
@@ -481,12 +597,47 @@ router.put('/:id', authenticateToken, resolveSiteAccess(req => Number(req.body.s
     // Validate label ID and request body
     const { id } = labelIdSchema.parse(req.params);
     const labelDataParsed = updateLabelSchema.parse(req.body);
+    const existing = await labelModel.findById(id, req.site!.id);
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        error: 'Label not found or no changes made',
+      } as ApiResponse);
+    }
+
+    const hasPatchPanelInput =
+      labelDataParsed.via_patch_panel !== undefined ||
+      labelDataParsed.patch_panel_sid_id !== undefined ||
+      labelDataParsed.patch_panel_port !== undefined;
+
+    const desiredViaPatchPanel =
+      labelDataParsed.via_patch_panel !== undefined
+        ? labelDataParsed.via_patch_panel
+        : (labelDataParsed.patch_panel_sid_id !== undefined || labelDataParsed.patch_panel_port !== undefined)
+          ? true
+          : Boolean(existing.via_patch_panel);
+
+    const patchPanelSelection = hasPatchPanelInput
+      ? await normalizePatchPanelSelection(req.site!.id, {
+          via_patch_panel: desiredViaPatchPanel,
+          patch_panel_sid_id:
+            labelDataParsed.patch_panel_sid_id !== undefined
+              ? labelDataParsed.patch_panel_sid_id
+              : (existing.patch_panel_sid_id ?? null),
+          patch_panel_port:
+            labelDataParsed.patch_panel_port !== undefined
+              ? labelDataParsed.patch_panel_port
+              : (existing.patch_panel_port ?? null),
+        })
+      : null;
+
     const labelData = {
       ...(labelDataParsed.source_location_id !== undefined ? { source_location_id: labelDataParsed.source_location_id } : {}),
       ...(labelDataParsed.destination_location_id !== undefined ? { destination_location_id: labelDataParsed.destination_location_id } : {}),
       ...(labelDataParsed.cable_type_id !== undefined ? { cable_type_id: labelDataParsed.cable_type_id } : {}),
       ...(labelDataParsed.notes !== undefined ? { notes: labelDataParsed.notes } : {}),
       ...(labelDataParsed.zpl_content !== undefined ? { zpl_content: labelDataParsed.zpl_content } : {}),
+      ...(patchPanelSelection ? patchPanelSelection : {}),
     };
 
     // Update label
@@ -533,6 +684,19 @@ router.put('/:id', authenticateToken, resolveSiteAccess(req => Number(req.body.s
     // Handle specific model errors
     if (error instanceof Error) {
       if (error.message === 'Source location is required' || error.message === 'Destination location is required') {
+        return res.status(400).json({
+          success: false,
+          error: error.message,
+        } as ApiResponse);
+      }
+
+      if (
+        error.message === 'Patch panel is required when enabled' ||
+        error.message === 'Patch panel port is required when enabled' ||
+        error.message === 'Selected patch panel SID is invalid for this site' ||
+        error.message === 'Selected SID is not a patch panel' ||
+        error.message.startsWith('Patch panel port must be between 1 and ')
+      ) {
         return res.status(400).json({
           success: false,
           error: error.message,

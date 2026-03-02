@@ -10,6 +10,9 @@ export interface CreateLabelData {
   created_by: number;
   notes?: string;
   zpl_content?: string;
+  via_patch_panel?: boolean;
+  patch_panel_sid_id?: number | null;
+  patch_panel_port?: number | null;
   type?: string;
 }
 
@@ -19,6 +22,9 @@ export interface UpdateLabelData {
   cable_type_id?: number;
   notes?: string;
   zpl_content?: string;
+  via_patch_panel?: boolean;
+  patch_panel_sid_id?: number | null;
+  patch_panel_port?: number | null;
   type?: string;
 }
 
@@ -268,12 +274,18 @@ export class LabelModel {
   private mapRow(row: any): Label {
     let notes: string | undefined;
     let zpl_content: string | undefined;
+    let via_patch_panel: boolean | undefined;
+    let patch_panel_sid_id: number | null | undefined;
+    let patch_panel_port: number | null | undefined;
 
     if (row.payload_json) {
       try {
         const payload = JSON.parse(row.payload_json) as any;
         notes = payload.notes ?? undefined;
         zpl_content = payload.zpl_content ?? undefined;
+        via_patch_panel = payload.via_patch_panel === true;
+        patch_panel_sid_id = payload.patch_panel_sid_id == null ? null : Number(payload.patch_panel_sid_id);
+        patch_panel_port = payload.patch_panel_port == null ? null : Number(payload.patch_panel_port);
       } catch {
         // ignore
       }
@@ -350,11 +362,26 @@ export class LabelModel {
       destination: formattedDestination,
       ...(notes !== undefined ? { notes } : {}),
       ...(zpl_content !== undefined ? { zpl_content } : {}),
+      ...(via_patch_panel !== undefined ? { via_patch_panel } : {}),
+      ...(patch_panel_sid_id !== undefined ? { patch_panel_sid_id } : {}),
+      ...(patch_panel_port !== undefined ? { patch_panel_port } : {}),
     };
   }
 
   async create(labelData: CreateLabelData): Promise<Label> {
-    const { site_id, created_by, notes, zpl_content, type = 'cable', source_location_id, destination_location_id, cable_type_id } = labelData;
+    const {
+      site_id,
+      created_by,
+      notes,
+      zpl_content,
+      via_patch_panel,
+      patch_panel_sid_id,
+      patch_panel_port,
+      type = 'cable',
+      source_location_id,
+      destination_location_id,
+      cable_type_id,
+    } = labelData;
 
     if (!Number.isFinite(source_location_id) || source_location_id < 1) {
       throw new Error('Source location is required');
@@ -376,6 +403,9 @@ export class LabelModel {
     const payload = {
       notes: notes || null,
       zpl_content: zpl_content || null,
+      via_patch_panel: via_patch_panel === true,
+      patch_panel_sid_id: via_patch_panel === true ? (patch_panel_sid_id ?? null) : null,
+      patch_panel_port: via_patch_panel === true ? (patch_panel_port ?? null) : null,
     };
 
     const result = await this.adapter.execute(
@@ -402,6 +432,9 @@ export class LabelModel {
       created_by,
       notes,
       zpl_content,
+      via_patch_panel,
+      patch_panel_sid_id,
+      patch_panel_port,
       type = 'cable',
       source_location_id,
       destination_location_id,
@@ -438,6 +471,9 @@ export class LabelModel {
     const payload = {
       notes: notes || null,
       zpl_content: zpl_content || null,
+      via_patch_panel: via_patch_panel === true,
+      patch_panel_sid_id: via_patch_panel === true ? (patch_panel_sid_id ?? null) : null,
+      patch_panel_port: via_patch_panel === true ? (patch_panel_port ?? null) : null,
     };
 
     let startRef = 1;
@@ -791,7 +827,13 @@ export class LabelModel {
       values.push(labelData.cable_type_id);
     }
 
-    if (labelData.notes !== undefined || labelData.zpl_content !== undefined) {
+    if (
+      labelData.notes !== undefined ||
+      labelData.zpl_content !== undefined ||
+      labelData.via_patch_panel !== undefined ||
+      labelData.patch_panel_sid_id !== undefined ||
+      labelData.patch_panel_port !== undefined
+    ) {
       const existing = await this.findById(id, siteId);
       const existingPayload = existing?.payload_json ? (() => {
         try { return JSON.parse(existing.payload_json) as any; } catch { return {}; }
@@ -803,6 +845,15 @@ export class LabelModel {
 
       if (labelData.notes !== undefined) payload.notes = labelData.notes || null;
       if (labelData.zpl_content !== undefined) payload.zpl_content = labelData.zpl_content || null;
+      if (labelData.via_patch_panel !== undefined) {
+        payload.via_patch_panel = labelData.via_patch_panel === true;
+        if (labelData.via_patch_panel !== true) {
+          payload.patch_panel_sid_id = null;
+          payload.patch_panel_port = null;
+        }
+      }
+      if (labelData.patch_panel_sid_id !== undefined) payload.patch_panel_sid_id = labelData.patch_panel_sid_id ?? null;
+      if (labelData.patch_panel_port !== undefined) payload.patch_panel_port = labelData.patch_panel_port ?? null;
 
       updates.push('payload_json = ?');
       values.push(JSON.stringify(payload));
