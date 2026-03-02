@@ -240,7 +240,7 @@ const SiteHubPage: React.FC = () => {
             <CardTitle className="text-center">Site Applications</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 gap-4 md:gap-6 sm:grid-cols-3 sm:justify-items-center">
+            <div className="grid grid-cols-1 gap-4 md:gap-6 sm:grid-cols-4 sm:justify-items-center">
               <div className="w-full space-y-2 text-center sm:max-w-xs">
                 <Button
                   variant="outline"
@@ -292,6 +292,24 @@ const SiteHubPage: React.FC = () => {
                 </Button>
                 <p className="text-sm text-muted-foreground text-center">
                   Create & Manage Stock IDs for this site
+                </p>
+              </div>
+
+              <div className="w-full space-y-2 text-center sm:max-w-xs">
+                <Button
+                  variant="outline"
+                  className="w-full h-auto min-h-32 flex-col items-center justify-center gap-3 whitespace-normal text-center p-6 sm:aspect-square sm:min-h-0"
+                  onClick={() => navigate(`/sites/${site.id}/mapindex`)}
+                >
+                  <img
+                    src="/mapindex-title.png"
+                    alt="MAPIndex"
+                    className="max-h-20 md:max-h-24 w-auto object-contain"
+                    loading="lazy"
+                  />
+                </Button>
+                <p className="text-sm text-muted-foreground text-center">
+                  Rack elevations and cable trace for this site
                 </p>
               </div>
             </div>

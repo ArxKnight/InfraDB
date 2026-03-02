@@ -24,6 +24,7 @@ import SiteCableAdminPage from './pages/SiteCableAdminPage'
 import SiteSidIndexPage from './pages/SiteSidIndexPage'
 import SiteSidAdminPage from './pages/SiteSidAdminPage'
 import SiteStockIndexPage from './pages/SiteStockIndexPage'
+import SiteMapIndexPage from './pages/SiteMapIndexPage'
 import SidDetailPage from './pages/SidDetailPage'
 
 const queryClient = new QueryClient({
@@ -214,6 +215,16 @@ function App() {
                       </Layout>
                     </ProtectedRoute>
                   } 
+                />
+                <Route
+                  path="/sites/:siteId/mapindex"
+                  element={
+                    <ProtectedRoute>
+                      <Layout>
+                        <SiteMapIndexPage />
+                      </Layout>
+                    </ProtectedRoute>
+                  }
                 />
                 <Route
                   path="/labels"

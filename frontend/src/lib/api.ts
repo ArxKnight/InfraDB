@@ -283,6 +283,49 @@ class ApiClient {
     return this.request<{ locations: any[] }>(`/sites/${siteId}/locations`);
   }
 
+  async getSiteRacks(siteId: number, query?: string) {
+    const searchParams = new URLSearchParams();
+    if (query && query.trim() !== '') searchParams.append('query', query.trim());
+    const suffix = searchParams.toString();
+    return this.request<{ racks: Array<{ id: number; rackLocation: string; rackSizeU: number }> }>(
+      `/sites/${siteId}/racks${suffix ? `?${suffix}` : ''}`
+    );
+  }
+
+  async getSiteRackElevation(siteId: number, rackIds: number[]) {
+    const filtered = rackIds
+      .map((id) => Number(id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    const searchParams = new URLSearchParams();
+    searchParams.append('rackIds', filtered.join(','));
+    return this.request<{
+      racks: Array<{
+        rackId: number;
+        rackLocation: string;
+        rackSizeU: number;
+        occupants: Array<{ uPosition: number; sidId: number; sidNumber: string; hostname: string }>;
+      }>;
+    }>(`/sites/${siteId}/racks/elevation?${searchParams.toString()}`);
+  }
+
+  async getSiteCableTrace(siteId: number, cableRef: string) {
+    return this.request<{
+      cableRef: string;
+      labelId: number;
+      hops: Array<{
+        hostname: string;
+        sidId: number | null;
+        manufacturer: string | null;
+        modelName: string | null;
+        rackLocation: string | null;
+        rackU: number | null;
+        rackUnits?: number | null;
+        portLabel: string | null;
+        nicType: string | null;
+      }>;
+    }>(`/sites/${siteId}/cables/${encodeURIComponent(cableRef)}/trace`);
+  }
+
   async createSiteLocation(siteId: number, data: {
     template_type?: 'DATACENTRE' | 'DOMESTIC';
     floor?: string;

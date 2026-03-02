@@ -96,6 +96,7 @@ describe('Site Routes', () => {
         suite: 'A',
         row: 'R1',
         rack: '01',
+        rack_size_u: 42,
       });
       const locB = await siteLocationModel.create({
         site_id: site.id,
@@ -103,6 +104,7 @@ describe('Site Routes', () => {
         suite: 'A',
         row: 'R1',
         rack: '02',
+        rack_size_u: 42,
       });
 
       await labelModel.create({
@@ -401,6 +403,7 @@ describe('Site Routes', () => {
         suite: 'A',
         row: 'R1',
         rack: '01',
+        rack_size_u: 42,
       });
 
       const sidTypes = await db.query('SELECT id FROM sid_types WHERE site_id = ? ORDER BY id ASC LIMIT 1', [site.id]);
@@ -422,6 +425,101 @@ describe('Site Routes', () => {
       expect(response.body.error).toContain('CPU Count');
       expect(response.body.error).toContain('RAM (GB)');
       expect(response.body.details?.missing_required_fields).toEqual(['CPU Count', 'RAM (GB)']);
+    });
+
+    it('allows Patch Panel create without Serial Number, CPU Count, or RAM (GB)', async () => {
+      const site = await siteModel.create({ name: 'Patch Panel Site', code: 'PPS', created_by: testUser.id });
+
+      await db.execute(
+        `INSERT INTO sid_types (site_id, name)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE name = name`,
+        [site.id, 'Patch Panel']
+      );
+      await db.execute(
+        `INSERT INTO sid_statuses (site_id, name)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE name = name`,
+        [site.id, 'New SID']
+      );
+      await db.execute(
+        `INSERT INTO sid_platforms (site_id, name)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE name = name`,
+        [site.id, 'Linux']
+      );
+      await db.execute(
+        `INSERT INTO sid_device_models (site_id, manufacturer, name)
+         VALUES (?, ?, ?)`,
+        [site.id, 'Generic', 'Patch Panel 24']
+      );
+      await db.execute(
+        `INSERT INTO sid_cpu_models (site_id, name)
+         VALUES (?, ?)`,
+        [site.id, 'N/A']
+      );
+      await db.execute(
+        `INSERT INTO sid_password_types (site_id, name)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE name = name`,
+        [site.id, 'OS Credentials']
+      );
+      await db.execute(
+        `INSERT INTO site_vlans (site_id, vlan_id, name)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE name = VALUES(name)`,
+        [site.id, 10, 'Servers']
+      );
+      await db.execute(
+        `INSERT INTO sid_nic_types (site_id, name)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE name = name`,
+        [site.id, 'RJ45']
+      );
+      await db.execute(
+        `INSERT INTO sid_nic_speeds (site_id, name)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE name = name`,
+        [site.id, '1G']
+      );
+
+      const location = await siteLocationModel.create({
+        site_id: site.id,
+        floor: '1',
+        suite: 'A',
+        row: 'R1',
+        rack: '02',
+        rack_size_u: 42,
+      });
+
+      const sidTypes = await db.query('SELECT id FROM sid_types WHERE site_id = ? AND name = ? LIMIT 1', [
+        site.id,
+        'Patch Panel',
+      ]);
+      const sidTypeId = Number((sidTypes?.[0] as any)?.id);
+
+      const response = await request(app)
+        .post(`/api/sites/${site.id}/sids`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          sid_type_id: sidTypeId,
+          serial_number: '',
+          location_id: location.id,
+          status: 'New SID',
+        })
+        .expect(201);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data?.sid?.id).toBeGreaterThan(0);
+
+      const createdSidRows = await db.query('SELECT sid_type_id, serial_number, cpu_count, ram_gb FROM sids WHERE id = ?', [
+        Number(response.body.data?.sid?.id),
+      ]);
+      const createdSid = (createdSidRows?.[0] as any) ?? null;
+      expect(Number(createdSid?.sid_type_id ?? 0)).toBe(sidTypeId);
+      expect(createdSid?.serial_number ?? null).toBeNull();
+      expect(createdSid?.cpu_count ?? null).toBeNull();
+      expect(createdSid?.ram_gb ?? null).toBeNull();
     });
   });
 
@@ -605,8 +703,8 @@ describe('Site Routes', () => {
     it('should prevent deletion when site has labels', async () => {
       const site = await siteModel.create({ name: 'Test Site', code: 'TS', created_by: testUser.id });
 
-      const locA = await siteLocationModel.create({ site_id: site.id, floor: '1', suite: 'A', row: 'R1', rack: '01' });
-      const locB = await siteLocationModel.create({ site_id: site.id, floor: '1', suite: 'A', row: 'R1', rack: '02' });
+      const locA = await siteLocationModel.create({ site_id: site.id, floor: '1', suite: 'A', row: 'R1', rack: '01', rack_size_u: 42 });
+      const locB = await siteLocationModel.create({ site_id: site.id, floor: '1', suite: 'A', row: 'R1', rack: '02', rack_size_u: 42 });
       const cableType = await cableTypeModel.create({ site_id: site.id, name: 'CAT6' });
       await labelModel.create({ site_id: site.id, created_by: testUser.id, source_location_id: locA.id, destination_location_id: locB.id, cable_type_id: cableType.id });
 
@@ -650,6 +748,236 @@ describe('Site Routes', () => {
     });
   });
 
+  describe('MapIndex endpoints', () => {
+    it('GET /api/sites/:id/racks should list site racks and support query filtering', async () => {
+      const site = await siteModel.create({
+        name: 'Map Site',
+        code: 'MAP',
+        created_by: testUser.id,
+      });
+
+      const rackA = await siteLocationModel.create({
+        site_id: site.id,
+        template_type: 'DATACENTRE',
+        floor: '0',
+        suite: '1',
+        row: 'A',
+        rack: '1',
+        rack_size_u: 42,
+        label: 'WAL',
+      });
+
+      await siteLocationModel.create({
+        site_id: site.id,
+        template_type: 'DATACENTRE',
+        floor: '0',
+        suite: '1',
+        row: 'A',
+        rack: '2',
+        rack_size_u: 48,
+        label: 'WAL',
+      });
+
+      const responseAll = await request(app)
+        .get(`/api/sites/${site.id}/racks`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(responseAll.body.success).toBe(true);
+      expect(Array.isArray(responseAll.body.data?.racks)).toBe(true);
+      expect(responseAll.body.data.racks.length).toBeGreaterThanOrEqual(2);
+      expect(responseAll.body.data.racks.some((r: any) => Number(r.id) === rackA.id)).toBe(true);
+
+      const responseFiltered = await request(app)
+        .get(`/api/sites/${site.id}/racks?query=R1`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(responseFiltered.body.success).toBe(true);
+      expect(responseFiltered.body.data.racks.length).toBeGreaterThanOrEqual(1);
+      expect(responseFiltered.body.data.racks.every((r: any) => String(r.rackLocation).includes('R1'))).toBe(true);
+    });
+
+    it('GET /api/sites/:id/racks/elevation should return occupants by U for selected racks', async () => {
+      const site = await siteModel.create({
+        name: 'Elevation Site',
+        code: 'ELV',
+        created_by: testUser.id,
+      });
+
+      const rack = await siteLocationModel.create({
+        site_id: site.id,
+        template_type: 'DATACENTRE',
+        floor: '1',
+        suite: 'A',
+        row: 'R1',
+        rack: '01',
+        rack_size_u: 42,
+        label: 'WAL',
+      });
+
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, hostname, status, location_id, rack_u)
+         VALUES (?, ?, ?, ?, ?, ?)`
+        , [site.id, '1', 'WAL-SW1', 'Active', rack.id, '22']
+      );
+
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, hostname, status, location_id, rack_u)
+         VALUES (?, ?, ?, ?, ?, ?)`
+        , [site.id, '6', 'WAL-PDU', 'Active', rack.id, '1']
+      );
+
+      const response = await request(app)
+        .get(`/api/sites/${site.id}/racks/elevation?rackIds=${rack.id}`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.racks).toHaveLength(1);
+      expect(response.body.data.racks[0].rackId).toBe(rack.id);
+      expect(response.body.data.racks[0].rackSizeU).toBe(42);
+
+      const occupants = response.body.data.racks[0].occupants as any[];
+      expect(occupants.some((o) => Number(o.uPosition) === 22 && String(o.hostname) === 'WAL-SW1')).toBe(true);
+      expect(occupants.some((o) => Number(o.uPosition) === 1 && String(o.hostname) === 'WAL-PDU')).toBe(true);
+    });
+
+    it('GET /api/sites/:id/cables/:cableRef/trace should resolve cable trace hops', async () => {
+      const site = await siteModel.create({
+        name: 'Trace Site',
+        code: 'TRC',
+        created_by: testUser.id,
+      });
+
+      const sourceLocation = await siteLocationModel.create({
+        site_id: site.id,
+        template_type: 'DATACENTRE',
+        floor: '0',
+        suite: '1',
+        row: 'A',
+        rack: '1',
+        rack_size_u: 42,
+        label: 'WAL',
+      });
+
+      const destinationLocation = await siteLocationModel.create({
+        site_id: site.id,
+        template_type: 'DATACENTRE',
+        floor: '0',
+        suite: '1',
+        row: 'A',
+        rack: '2',
+        rack_size_u: 42,
+        label: 'WAL',
+      });
+
+      const cableType = await cableTypeModel.create({ site_id: site.id, name: 'CAT6' });
+
+      await db.execute(
+        `INSERT INTO sid_device_models (site_id, manufacturer, name, is_patch_panel, default_patch_panel_port_count)
+         VALUES (?, ?, ?, ?, ?)`
+        , [site.id, 'Molex', 'PowerCat', 1, 24]
+      );
+      const modelRows = await db.query(
+        'SELECT id FROM sid_device_models WHERE site_id = ? AND name = ? ORDER BY id DESC LIMIT 1',
+        [site.id, 'PowerCat']
+      );
+      const patchPanelModelId = Number((modelRows?.[0] as any)?.id);
+
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, hostname, status, location_id, rack_u)
+         VALUES (?, ?, ?, ?, ?, ?)`
+        , [site.id, '10', 'WAL-SW1', 'Active', sourceLocation.id, '22']
+      );
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, hostname, status, location_id, rack_u, device_model_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        , [site.id, '3', 'WAL-PP1', 'Active', sourceLocation.id, '21', patchPanelModelId]
+      );
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, hostname, status, location_id, rack_u)
+         VALUES (?, ?, ?, ?, ?, ?)`
+        , [site.id, '4', 'WAL-SW2', 'Active', destinationLocation.id, '22']
+      );
+
+      const sidRows = await db.query(
+        'SELECT id, sid_number FROM sids WHERE site_id = ? AND sid_number IN (?, ?, ?) ORDER BY sid_number ASC',
+        [site.id, '10', '3', '4']
+      );
+      const sidByNumber = new Map<string, number>();
+      for (const row of sidRows as any[]) {
+        sidByNumber.set(String(row.sid_number), Number(row.id));
+      }
+
+      await db.execute(
+        `INSERT INTO sid_nic_types (site_id, name)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE name = name`
+        , [site.id, 'RJ45']
+      );
+      const nicTypeRows = await db.query(
+        'SELECT id FROM sid_nic_types WHERE site_id = ? AND name = ? ORDER BY id DESC LIMIT 1',
+        [site.id, 'RJ45']
+      );
+      const nicTypeId = Number((nicTypeRows?.[0] as any)?.id);
+
+      await db.execute(
+        `INSERT INTO sid_nics (sid_id, name, nic_type_id) VALUES (?, ?, ?)`
+        , [sidByNumber.get('10'), 'NIC1', nicTypeId]
+      );
+      const nicRows = await db.query(
+        'SELECT id FROM sid_nics WHERE sid_id = ? AND name = ? ORDER BY id DESC LIMIT 1',
+        [sidByNumber.get('10'), 'NIC1']
+      );
+      const sourceNicId = Number((nicRows?.[0] as any)?.id);
+
+      await db.execute(
+        `INSERT INTO sid_connections (site_id, sid_id, nic_id, switch_sid_id, switch_port)
+         VALUES (?, ?, ?, ?, ?)`
+        , [site.id, sidByNumber.get('10'), sourceNicId, sidByNumber.get('3'), '3']
+      );
+
+      await labelModel.create({
+        site_id: site.id,
+        created_by: testUser.id,
+        source_location_id: sourceLocation.id,
+        destination_location_id: destinationLocation.id,
+        cable_type_id: cableType.id,
+        via_patch_panel: true,
+        patch_panel_sid_id: sidByNumber.get('3') ?? null,
+        patch_panel_port: 3,
+      });
+
+      const response = await request(app)
+        .get(`/api/sites/${site.id}/cables/0001/trace`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.cableRef).toBe('#0001');
+      expect(Array.isArray(response.body.data.hops)).toBe(true);
+      expect(response.body.data.hops.length).toBeGreaterThanOrEqual(2);
+
+      const hopHostnames = (response.body.data.hops as any[]).map((h) => String(h.hostname));
+      expect(hopHostnames).toContain('WAL-SW1');
+      expect(hopHostnames).toContain('WAL-PP1');
+    });
+
+    it('GET /api/sites/:id/cables/:cableRef/trace should return 404 for unknown cable ref', async () => {
+      const site = await siteModel.create({
+        name: 'Missing Trace Site',
+        code: 'MTS',
+        created_by: testUser.id,
+      });
+
+      await request(app)
+        .get(`/api/sites/${site.id}/cables/9999/trace`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(404);
+    });
+  });
+
   describe('GET /api/sites/:id/cable-report', () => {
     it('should download a DOCX cable report for a site member', async () => {
       const site = await siteModel.create({
@@ -667,6 +995,7 @@ describe('Site Routes', () => {
         row: 'R1',
         rack: '01',
         label: 'Loft',
+        rack_size_u: 42,
       });
       const locB = await siteLocationModel.create({
         site_id: site.id,
@@ -675,6 +1004,7 @@ describe('Site Routes', () => {
         row: 'R1',
         rack: '02',
         label: 'Garage',
+        rack_size_u: 42,
       });
 
       await labelModel.create({

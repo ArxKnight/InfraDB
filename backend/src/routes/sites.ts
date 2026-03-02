@@ -296,14 +296,202 @@ function normalizeLocationSearchTerm(input: string): string {
     .join('/');
 }
 
+const getRacksQuerySchema = z.object({
+  query: z.string().optional(),
+}).passthrough();
+
+const getRackElevationQuerySchema = z.object({
+  rackIds: z.string().min(1, 'rackIds is required'),
+}).passthrough();
+
+const cableTraceParamSchema = z.object({
+  cableRef: z.string().min(1, 'Cable reference is required'),
+});
+
+function withPrefix(prefix: string, value: unknown): string {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const up = raw.toUpperCase();
+  if (up.startsWith(prefix.toUpperCase())) return raw;
+  return `${prefix}${raw}`;
+}
+
+function formatRackLocationPath(row: {
+  effective_label?: unknown;
+  label?: unknown;
+  site_code?: unknown;
+  floor?: unknown;
+  suite?: unknown;
+  row?: unknown;
+  rack?: unknown;
+  area?: unknown;
+  template_type?: unknown;
+}): string {
+  const label = String(row.effective_label ?? row.label ?? row.site_code ?? '').trim();
+  const floor = withPrefix('FL', row.floor);
+  const template = String(row.template_type ?? '').trim().toUpperCase();
+
+  if (template === 'DOMESTIC') {
+    const area = String(row.area ?? '').trim();
+    return [label, floor, area].filter((p) => p !== '').join('/');
+  }
+
+  const suite = withPrefix('S', row.suite);
+  const rowKey = withPrefix('ROW', row.row);
+  const rack = withPrefix('R', row.rack);
+  return [label, floor, suite, rowKey, rack].filter((p) => p !== '').join('/');
+}
+
+function parseRackUPosition(value: unknown): number | null {
+  const normalized = normalizeRackU(value);
+  if (!normalized) return null;
+  const match = normalized.match(/^(\d{1,4})/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function normalizeCableRefToNumber(input: string): number | null {
+  const raw = String(input ?? '').trim();
+  if (!raw) return null;
+  const stripped = raw.replace(/^#/, '').trim();
+  const parsed = Number.parseInt(stripped, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return null;
+  return parsed;
+}
+
+async function fetchLocationPreferredSid(params: {
+  adapter: ReturnType<typeof getAdapter>;
+  siteId: number;
+  locationId: number;
+  preferredSwitchSidId?: number | null;
+  preferredSwitchPort?: string | null;
+}) {
+  const { adapter, siteId, locationId, preferredSwitchSidId, preferredSwitchPort } = params;
+  const where: string[] = [
+    's.site_id = ?',
+    's.location_id = ?',
+    "LOWER(TRIM(COALESCE(s.status, ''))) <> 'deleted'",
+  ];
+  const sqlParams: any[] = [siteId, locationId];
+
+  if (
+    Number.isFinite(Number(preferredSwitchSidId)) &&
+    Number(preferredSwitchSidId) > 0 &&
+    String(preferredSwitchPort ?? '').trim() !== ''
+  ) {
+    where.push('sc.switch_sid_id = ?');
+    where.push('TRIM(sc.switch_port) = ?');
+    sqlParams.push(Number(preferredSwitchSidId), String(preferredSwitchPort).trim());
+  }
+
+  const rows = await adapter.query(
+    `SELECT
+       s.id as sid_id,
+       s.sid_number,
+       s.hostname,
+       s.rack_u,
+       dm.manufacturer,
+       dm.name as model_name,
+       sl.template_type,
+       sl.floor,
+       sl.suite,
+       sl.\`row\` as \`row\`,
+       sl.rack,
+       sl.area,
+       COALESCE(NULLIF(TRIM(sl.label), ''), si.code) as effective_label,
+       sn.name as nic_name,
+       nt.name as nic_type,
+       sc.switch_port
+     FROM sids s
+     LEFT JOIN sid_device_models dm ON dm.id = s.device_model_id
+     LEFT JOIN site_locations sl ON sl.id = s.location_id
+     LEFT JOIN sites si ON si.id = s.site_id
+     LEFT JOIN sid_nics sn ON sn.sid_id = s.id
+     LEFT JOIN sid_nic_types nt ON nt.id = sn.nic_type_id
+     LEFT JOIN sid_connections sc ON sc.nic_id = sn.id
+     WHERE ${where.join(' AND ')}
+     ORDER BY
+       CASE WHEN sc.id IS NULL THEN 1 ELSE 0 END,
+       CAST(COALESCE(NULLIF(TRIM(s.rack_u), ''), '0') AS UNSIGNED) DESC,
+       s.id ASC
+     LIMIT 1`,
+    sqlParams
+  );
+
+  return (rows?.[0] as any) ?? null;
+}
+
+async function fetchSidHopById(params: {
+  adapter: ReturnType<typeof getAdapter>;
+  siteId: number;
+  sidId: number;
+}) {
+  const { adapter, siteId, sidId } = params;
+  const rows = await adapter.query(
+    `SELECT
+       s.id as sid_id,
+       s.sid_number,
+       s.hostname,
+       s.rack_u,
+       dm.manufacturer,
+       dm.name as model_name,
+       sl.template_type,
+       sl.floor,
+       sl.suite,
+       sl.\`row\` as \`row\`,
+       sl.rack,
+       sl.area,
+       COALESCE(NULLIF(TRIM(sl.label), ''), si.code) as effective_label
+     FROM sids s
+     LEFT JOIN sid_device_models dm ON dm.id = s.device_model_id
+     LEFT JOIN site_locations sl ON sl.id = s.location_id
+     LEFT JOIN sites si ON si.id = s.site_id
+     WHERE s.site_id = ? AND s.id = ?
+     LIMIT 1`,
+    [siteId, sidId]
+  );
+  return (rows?.[0] as any) ?? null;
+}
+
+function mapSidRowToTraceHop(
+  sidRow: any,
+  overrides?: {
+    portLabel?: string | null;
+    nicType?: string | null;
+  }
+) {
+  if (!sidRow) return null;
+  const sidId = Number(sidRow.sid_id ?? sidRow.id ?? 0);
+  if (!Number.isFinite(sidId) || sidId < 1) return null;
+  const rackU = parseRackUPosition(sidRow.rack_u);
+  return {
+    hostname: String(sidRow.hostname ?? '').trim() || `SID-${sidId}`,
+    sidId,
+    manufacturer: String(sidRow.manufacturer ?? '').trim() || null,
+    modelName: String(sidRow.model_name ?? '').trim() || null,
+    rackLocation: formatRackLocationPath(sidRow),
+    rackU,
+    rackUnits: rackU,
+    portLabel:
+      overrides?.portLabel ??
+      (String(sidRow.switch_port ?? '').trim() !== '' ? `Port ${String(sidRow.switch_port).trim()}` : null),
+    nicType: overrides?.nicType ?? (String(sidRow.nic_type ?? '').trim() || null),
+  };
+}
+
 const createSidSchema = z.object({
   sid_type_id: z.coerce.number().int().positive(),
   device_model_id: z.coerce.number().int().positive().optional().nullable(),
   cpu_model_id: z.coerce.number().int().positive().optional().nullable(),
   hostname: z.string().max(255).optional().nullable(),
   serial_number: z.preprocess(
-    (v) => (typeof v === 'string' ? v.trim() : v),
-    z.string().min(1).max(255)
+    (v) => {
+      if (typeof v !== 'string') return v;
+      const trimmed = v.trim();
+      return trimmed === '' ? null : trimmed;
+    },
+    z.string().max(255).optional().nullable()
   ),
   // Status defaults to "New SID" if omitted/blank.
   status: z.preprocess(
@@ -1021,12 +1209,28 @@ router.post(
       const rackU = body.rack_u === undefined ? null : normalizeRackU(body.rack_u);
       const adapter = getAdapter();
 
-      const missingRequiredFields: string[] = [];
-      if (!Number.isFinite(Number(body.cpu_count)) || Number(body.cpu_count) <= 0) {
-        missingRequiredFields.push('CPU Count');
+      const sidTypeRows = await adapter.query(
+        'SELECT name FROM sid_types WHERE id = ? AND site_id = ? LIMIT 1',
+        [body.sid_type_id, siteId]
+      );
+      const sidTypeRow = (sidTypeRows?.[0] as any) ?? null;
+      if (!sidTypeRow) {
+        return res.status(400).json({ success: false, error: 'Invalid SID type' } as ApiResponse);
       }
-      if (!Number.isFinite(Number(body.ram_gb)) || Number(body.ram_gb) <= 0) {
-        missingRequiredFields.push('RAM (GB)');
+      const sidTypeName = String(sidTypeRow.name ?? '').trim().toLowerCase();
+      const isPatchPanelSidType = sidTypeName === 'patch panel';
+
+      const missingRequiredFields: string[] = [];
+      if (!isPatchPanelSidType) {
+        if (String(body.serial_number ?? '').trim() === '') {
+          missingRequiredFields.push('Serial Number');
+        }
+        if (!Number.isFinite(Number(body.cpu_count)) || Number(body.cpu_count) <= 0) {
+          missingRequiredFields.push('CPU Count');
+        }
+        if (!Number.isFinite(Number(body.ram_gb)) || Number(body.ram_gb) <= 0) {
+          missingRequiredFields.push('RAM (GB)');
+        }
       }
       if (missingRequiredFields.length > 0) {
         return res.status(400).json({
@@ -4806,6 +5010,378 @@ router.put('/:id', authenticateToken, resolveSiteAccess(req => Number(req.params
     } as ApiResponse);
   }
 });
+
+/**
+ * GET /api/sites/:id/racks
+ * Search rack locations for MapIndex Rack View
+ */
+router.get(
+  '/:id/racks',
+  authenticateToken,
+  resolveSiteAccess(req => Number(req.params.id)),
+  async (req: Request, res: Response) => {
+    try {
+      const { id: siteId } = siteIdSchema.parse(req.params);
+      const queryParsed = getRacksQuerySchema.parse(req.query);
+      const queryText = String(queryParsed.query ?? '').trim();
+      const adapter = getAdapter();
+
+      const baseSql = `
+        SELECT
+          sl.id,
+          sl.template_type,
+          sl.floor,
+          sl.suite,
+          sl.\`row\` as \`row\`,
+          sl.rack,
+          sl.area,
+          sl.rack_size_u,
+          COALESCE(NULLIF(TRIM(sl.label), ''), si.code) AS effective_label,
+          si.code as site_code
+        FROM site_locations sl
+        JOIN sites si ON si.id = sl.site_id
+        WHERE sl.site_id = ?
+          AND UPPER(TRIM(COALESCE(sl.template_type, 'DATACENTRE'))) = 'DATACENTRE'
+          AND NULLIF(TRIM(sl.rack), '') IS NOT NULL
+      `;
+
+      const rows = await adapter.query(
+        `${baseSql}
+         ORDER BY
+           COALESCE(NULLIF(TRIM(sl.label), ''), si.code) ASC,
+           CAST(COALESCE(NULLIF(TRIM(sl.floor), ''), '0') AS UNSIGNED) ASC,
+           CAST(COALESCE(NULLIF(TRIM(sl.suite), ''), '0') AS UNSIGNED) ASC,
+           CAST(COALESCE(NULLIF(TRIM(sl.\`row\`), ''), '0') AS UNSIGNED) ASC,
+           CAST(COALESCE(NULLIF(TRIM(sl.rack), ''), '0') AS UNSIGNED) ASC,
+           sl.id ASC`,
+        [siteId]
+      );
+
+      const mapped = (rows ?? []).map((row: any) => {
+        const rackLocation = formatRackLocationPath(row);
+        const rackSizeRaw = Number(row?.rack_size_u ?? 0);
+        const rackSizeU = Number.isFinite(rackSizeRaw) && rackSizeRaw > 0 ? Math.trunc(rackSizeRaw) : 42;
+        return {
+          id: Number(row.id),
+          rackLocation,
+          rackSizeU,
+        };
+      });
+
+      const filtered = queryText
+        ? mapped.filter((rack: any) => rack.rackLocation.toLowerCase().includes(queryText.toLowerCase()))
+        : mapped;
+
+      return res.json({
+        success: true,
+        data: {
+          racks: filtered.slice(0, 200),
+        },
+      } as ApiResponse);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: error.errors,
+        } as ApiResponse);
+      }
+      console.error('Get racks error:', error);
+      return res.status(500).json({ success: false, error: 'Internal server error' } as ApiResponse);
+    }
+  }
+);
+
+/**
+ * GET /api/sites/:id/racks/elevation?rackIds=1,2,3
+ * Return rack elevation occupants for one or more racks
+ */
+router.get(
+  '/:id/racks/elevation',
+  authenticateToken,
+  resolveSiteAccess(req => Number(req.params.id)),
+  async (req: Request, res: Response) => {
+    try {
+      const { id: siteId } = siteIdSchema.parse(req.params);
+      const queryParsed = getRackElevationQuerySchema.parse(req.query);
+      const rackIds = String(queryParsed.rackIds)
+        .split(',')
+        .map((part) => Number(part.trim()))
+        .filter((id) => Number.isFinite(id) && id > 0)
+        .slice(0, 100);
+
+      if (rackIds.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'rackIds must contain at least one valid rack id',
+        } as ApiResponse);
+      }
+
+      const adapter = getAdapter();
+      const rackRows = await adapter.query(
+        `SELECT
+           sl.id,
+           sl.template_type,
+           sl.floor,
+           sl.suite,
+           sl.\`row\` as \`row\`,
+           sl.rack,
+           sl.area,
+           sl.rack_size_u,
+           COALESCE(NULLIF(TRIM(sl.label), ''), si.code) AS effective_label,
+           si.code as site_code
+         FROM site_locations sl
+         JOIN sites si ON si.id = sl.site_id
+         WHERE sl.site_id = ?
+           AND sl.id IN (${rackIds.map(() => '?').join(', ')})
+           AND UPPER(TRIM(COALESCE(sl.template_type, 'DATACENTRE'))) = 'DATACENTRE'
+         ORDER BY sl.id ASC`,
+        [siteId, ...rackIds]
+      );
+
+      if (!rackRows.length) {
+        return res.json({ success: true, data: { racks: [] } } as ApiResponse);
+      }
+
+      const validRackIds = rackRows.map((r: any) => Number(r.id)).filter((id) => Number.isFinite(id) && id > 0);
+      const sidRows = await adapter.query(
+        `SELECT
+           s.id,
+           s.sid_number,
+           s.hostname,
+           s.location_id,
+           s.rack_u
+         FROM sids s
+         WHERE s.site_id = ?
+           AND s.location_id IN (${validRackIds.map(() => '?').join(', ')})
+           AND LOWER(TRIM(COALESCE(s.status, ''))) <> 'deleted'
+         ORDER BY s.location_id ASC, s.id ASC`,
+        [siteId, ...validRackIds]
+      );
+
+      const byRack = new Map<number, Array<{ uPosition: number; sidId: number; sidNumber: string; hostname: string }>>();
+      for (const sid of sidRows ?? []) {
+        const rackId = Number((sid as any).location_id);
+        if (!Number.isFinite(rackId) || rackId < 1) continue;
+        const uPosition = parseRackUPosition((sid as any).rack_u);
+        if (!uPosition) continue;
+
+        const existing = byRack.get(rackId) ?? [];
+        if (!existing.some((o) => o.uPosition === uPosition)) {
+          existing.push({
+            uPosition,
+            sidId: Number((sid as any).id),
+            sidNumber: String((sid as any).sid_number ?? '').trim(),
+            hostname: String((sid as any).hostname ?? '').trim(),
+          });
+        }
+        byRack.set(rackId, existing);
+      }
+
+      const racks = (rackRows ?? []).map((rack: any) => {
+        const rackId = Number(rack.id);
+        const rackSizeRaw = Number(rack?.rack_size_u ?? 0);
+        const rackSizeU = Number.isFinite(rackSizeRaw) && rackSizeRaw > 0 ? Math.trunc(rackSizeRaw) : 42;
+        const occupants = (byRack.get(rackId) ?? []).sort((a, b) => b.uPosition - a.uPosition);
+        return {
+          rackId,
+          rackLocation: formatRackLocationPath(rack),
+          rackSizeU,
+          occupants,
+        };
+      });
+
+      return res.json({ success: true, data: { racks } } as ApiResponse);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: error.errors,
+        } as ApiResponse);
+      }
+      console.error('Get rack elevation error:', error);
+      return res.status(500).json({ success: false, error: 'Internal server error' } as ApiResponse);
+    }
+  }
+);
+
+/**
+ * GET /api/sites/:id/cables/:cableRef/trace
+ * Return best-effort cable trace hops for a cable reference
+ */
+router.get(
+  '/:id/cables/:cableRef/trace',
+  authenticateToken,
+  resolveSiteAccess(req => Number(req.params.id)),
+  async (req: Request, res: Response) => {
+    try {
+      const { id: siteId } = siteIdSchema.parse(req.params);
+      const { cableRef } = cableTraceParamSchema.parse(req.params);
+      const refNumber = normalizeCableRefToNumber(cableRef);
+      if (!refNumber) {
+        return res.status(400).json({ success: false, error: 'Invalid cable reference' } as ApiResponse);
+      }
+
+      const adapter = getAdapter();
+      const labelRows = await adapter.query(
+        `SELECT id, ref_number, ref_string, source_location_id, destination_location_id, payload_json
+         FROM labels
+         WHERE site_id = ? AND ref_number = ?
+         LIMIT 1`,
+        [siteId, refNumber]
+      );
+      const label = (labelRows?.[0] as any) ?? null;
+      if (!label) {
+        return res.status(404).json({ success: false, error: 'Cable ref not found' } as ApiResponse);
+      }
+
+      let payload: any = {};
+      try {
+        payload = label.payload_json ? JSON.parse(label.payload_json) : {};
+      } catch {
+        payload = {};
+      }
+
+      const viaPatchPanel = payload?.via_patch_panel === true;
+      const patchPanelSidId = Number(payload?.patch_panel_sid_id ?? 0);
+      const patchPanelPortRaw = Number(payload?.patch_panel_port ?? 0);
+      const patchPanelPort = Number.isFinite(patchPanelPortRaw) && patchPanelPortRaw > 0 ? String(Math.trunc(patchPanelPortRaw)) : '';
+
+      const sourceLocationId = Number(label.source_location_id ?? 0);
+      const destinationLocationId = Number(label.destination_location_id ?? 0);
+
+      const sourceSid = sourceLocationId > 0
+        ? await fetchLocationPreferredSid({
+            adapter,
+            siteId,
+            locationId: sourceLocationId,
+            ...(viaPatchPanel && patchPanelSidId > 0 && patchPanelPort !== ''
+              ? { preferredSwitchSidId: patchPanelSidId, preferredSwitchPort: patchPanelPort }
+              : {}),
+          })
+        : null;
+
+      const destinationSid = destinationLocationId > 0
+        ? await fetchLocationPreferredSid({
+            adapter,
+            siteId,
+            locationId: destinationLocationId,
+          })
+        : null;
+
+      const patchPanelSid = viaPatchPanel && patchPanelSidId > 0
+        ? await fetchSidHopById({ adapter, siteId, sidId: patchPanelSidId })
+        : null;
+
+      const hops: any[] = [];
+
+      if (sourceSid) {
+        hops.push(
+          mapSidRowToTraceHop(sourceSid, {
+            portLabel: String(sourceSid.switch_port ?? '').trim() !== '' ? `Port ${String(sourceSid.switch_port).trim()}` : null,
+            nicType: String(sourceSid.nic_type ?? '').trim() || null,
+          })
+        );
+      } else if (sourceLocationId > 0) {
+        const locationRows = await adapter.query(
+          `SELECT
+             sl.template_type,
+             sl.floor,
+             sl.suite,
+             sl.\`row\` as \`row\`,
+             sl.rack,
+             sl.area,
+             COALESCE(NULLIF(TRIM(sl.label), ''), si.code) AS effective_label
+           FROM site_locations sl
+           JOIN sites si ON si.id = sl.site_id
+           WHERE sl.site_id = ? AND sl.id = ?
+           LIMIT 1`,
+          [siteId, sourceLocationId]
+        );
+        const srcLoc = (locationRows?.[0] as any) ?? null;
+        hops.push({
+          hostname: 'Unknown endpoint',
+          sidId: null,
+          manufacturer: null,
+          modelName: null,
+          rackLocation: srcLoc ? formatRackLocationPath(srcLoc) : null,
+          rackU: null,
+          rackUnits: null,
+          portLabel: null,
+          nicType: null,
+        });
+      }
+
+      if (patchPanelSid) {
+        const patchHop = mapSidRowToTraceHop(patchPanelSid, {
+          portLabel: patchPanelPort !== '' ? `Port ${patchPanelPort}` : null,
+          nicType: null,
+        });
+        if (patchHop && !hops.some((h) => h && h.sidId === patchHop.sidId)) {
+          hops.push(patchHop);
+        }
+      }
+
+      if (destinationSid) {
+        const destHop = mapSidRowToTraceHop(destinationSid, {
+          portLabel: String(destinationSid.switch_port ?? '').trim() !== '' ? `Port ${String(destinationSid.switch_port).trim()}` : null,
+          nicType: String(destinationSid.nic_type ?? '').trim() || null,
+        });
+        if (destHop && !hops.some((h) => h && h.sidId === destHop.sidId)) {
+          hops.push(destHop);
+        }
+      } else if (destinationLocationId > 0) {
+        const locationRows = await adapter.query(
+          `SELECT
+             sl.template_type,
+             sl.floor,
+             sl.suite,
+             sl.\`row\` as \`row\`,
+             sl.rack,
+             sl.area,
+             COALESCE(NULLIF(TRIM(sl.label), ''), si.code) AS effective_label
+           FROM site_locations sl
+           JOIN sites si ON si.id = sl.site_id
+           WHERE sl.site_id = ? AND sl.id = ?
+           LIMIT 1`,
+          [siteId, destinationLocationId]
+        );
+        const dstLoc = (locationRows?.[0] as any) ?? null;
+        hops.push({
+          hostname: 'Unknown endpoint',
+          sidId: null,
+          manufacturer: null,
+          modelName: null,
+          rackLocation: dstLoc ? formatRackLocationPath(dstLoc) : null,
+          rackU: null,
+          rackUnits: null,
+          portLabel: null,
+          nicType: null,
+        });
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          cableRef: `#${String(refNumber).padStart(4, '0')}`,
+          labelId: Number(label.id),
+          hops: hops.filter(Boolean),
+        },
+      } as ApiResponse);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: error.errors,
+        } as ApiResponse);
+      }
+      console.error('Get cable trace error:', error);
+      return res.status(500).json({ success: false, error: 'Internal server error' } as ApiResponse);
+    }
+  }
+);
 
 /**
  * GET /api/sites/:id/locations

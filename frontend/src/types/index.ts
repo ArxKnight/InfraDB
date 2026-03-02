@@ -134,6 +134,38 @@ export interface LabelStats {
   labels_today: number;
 }
 
+export interface MapRackOption {
+  id: number;
+  rackLocation: string;
+  rackSizeU: number;
+}
+
+export interface MapRackOccupant {
+  uPosition: number;
+  sidId: number;
+  sidNumber: string;
+  hostname: string;
+}
+
+export interface MapRackElevation {
+  rackId: number;
+  rackLocation: string;
+  rackSizeU: number;
+  occupants: MapRackOccupant[];
+}
+
+export interface MapCableTraceHop {
+  hostname: string;
+  sidId: number | null;
+  manufacturer: string | null;
+  modelName: string | null;
+  rackLocation: string | null;
+  rackU: number | null;
+  rackUnits?: number | null;
+  portLabel: string | null;
+  nicType: string | null;
+}
+
 export type UserRole = 'GLOBAL_ADMIN' | 'USER';
 export type SiteRole = 'SITE_ADMIN' | 'SITE_USER';
 

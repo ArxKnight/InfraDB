@@ -1271,26 +1271,43 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
     return vlanNumber || vlanName;
   }, [onBoardNic1?.site_vlan_id, vlans]);
 
+  const selectedSidTypeName = React.useMemo(() => {
+    const sidTypeId = Number(sid?.sid_type_id ?? 0);
+    if (!Number.isFinite(sidTypeId) || sidTypeId <= 0) return '';
+    const match = (Array.isArray(sidTypes) ? sidTypes : []).find((t) => Number(t?.id) === sidTypeId);
+    return String(match?.name ?? '').trim();
+  }, [sid?.sid_type_id, sidTypes]);
+
+  const isPatchPanelSidType = React.useMemo(() => {
+    return selectedSidTypeName.toLowerCase() === 'patch panel';
+  }, [selectedSidTypeName]);
+
   const missingCreateRequiredFields = React.useMemo(() => {
     if (!isCreate || !sid) return [] as string[];
 
     const missing: string[] = [];
     if (String(sid.status ?? '').trim() === '') missing.push('Status');
     if (!Number.isFinite(Number(sid.sid_type_id)) || Number(sid.sid_type_id) <= 0) missing.push('SID Type');
-    if (String(sid.serial_number ?? '').trim() === '') missing.push('Serial Number');
+    if (!isPatchPanelSidType && String(sid.serial_number ?? '').trim() === '') missing.push('Serial Number');
     if (!Number.isFinite(Number(sid.location_id)) || Number(sid.location_id) <= 0) missing.push('Device Location');
-    if (!Number.isFinite(Number(sid.cpu_count)) || Number(sid.cpu_count) <= 0) missing.push('CPU Count');
-    if (!Number.isFinite(Number(sid.ram_gb)) || Number(sid.ram_gb) <= 0) missing.push('RAM (GB)');
+    if (!isPatchPanelSidType && (!Number.isFinite(Number(sid.cpu_count)) || Number(sid.cpu_count) <= 0)) {
+      missing.push('CPU Count');
+    }
+    if (!isPatchPanelSidType && (!Number.isFinite(Number(sid.ram_gb)) || Number(sid.ram_gb) <= 0)) {
+      missing.push('RAM (GB)');
+    }
     return missing;
   }, [
     isCreate,
     sid,
+    sidTypes,
     sid?.status,
     sid?.sid_type_id,
     sid?.serial_number,
     sid?.location_id,
     sid?.cpu_count,
     sid?.ram_gb,
+    isPatchPanelSidType,
   ]);
 
   if (loading) {
