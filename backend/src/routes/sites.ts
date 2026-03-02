@@ -5150,8 +5150,10 @@ router.get(
            s.sid_number,
            s.hostname,
            s.location_id,
-           s.rack_u
+           s.rack_u,
+           dm.rack_u AS model_rack_u
          FROM sids s
+         LEFT JOIN sid_device_models dm ON dm.id = s.device_model_id
          WHERE s.site_id = ?
            AND s.location_id IN (${validRackIds.map(() => '?').join(', ')})
            AND LOWER(TRIM(COALESCE(s.status, ''))) <> 'deleted'
@@ -5159,17 +5161,20 @@ router.get(
         [siteId, ...validRackIds]
       );
 
-      const byRack = new Map<number, Array<{ uPosition: number; sidId: number; sidNumber: string; hostname: string }>>();
+      const byRack = new Map<number, Array<{ uPosition: number; rackUnits: number; sidId: number; sidNumber: string; hostname: string }>>();
       for (const sid of sidRows ?? []) {
         const rackId = Number((sid as any).location_id);
         if (!Number.isFinite(rackId) || rackId < 1) continue;
         const uPosition = parseRackUPosition((sid as any).rack_u);
         if (!uPosition) continue;
+        const modelRackUnits = parseRackUPosition((sid as any).model_rack_u);
+        const rackUnits = Number.isFinite(modelRackUnits as any) && Number(modelRackUnits) > 0 ? Number(modelRackUnits) : 1;
 
         const existing = byRack.get(rackId) ?? [];
         if (!existing.some((o) => o.uPosition === uPosition)) {
           existing.push({
             uPosition,
+            rackUnits,
             sidId: Number((sid as any).id),
             sidNumber: String((sid as any).sid_number ?? '').trim(),
             hostname: String((sid as any).hostname ?? '').trim(),
@@ -5248,27 +5253,41 @@ router.get(
       const patchPanelPortRaw = Number(payload?.patch_panel_port ?? 0);
       const patchPanelPort = Number.isFinite(patchPanelPortRaw) && patchPanelPortRaw > 0 ? String(Math.trunc(patchPanelPortRaw)) : '';
 
+      const sourceConnectedSidIdRaw = Number(payload?.source_connected_sid_id ?? 0);
+      const sourceConnectedSidId = Number.isFinite(sourceConnectedSidIdRaw) && sourceConnectedSidIdRaw > 0 ? Math.trunc(sourceConnectedSidIdRaw) : 0;
+      const sourceConnectedHostname = String(payload?.source_connected_hostname ?? '').trim();
+      const sourceConnectedPort = String(payload?.source_connected_port ?? '').trim();
+
+      const destinationConnectedSidIdRaw = Number(payload?.destination_connected_sid_id ?? 0);
+      const destinationConnectedSidId = Number.isFinite(destinationConnectedSidIdRaw) && destinationConnectedSidIdRaw > 0 ? Math.trunc(destinationConnectedSidIdRaw) : 0;
+      const destinationConnectedHostname = String(payload?.destination_connected_hostname ?? '').trim();
+      const destinationConnectedPort = String(payload?.destination_connected_port ?? '').trim();
+
       const sourceLocationId = Number(label.source_location_id ?? 0);
       const destinationLocationId = Number(label.destination_location_id ?? 0);
 
-      const sourceSid = sourceLocationId > 0
-        ? await fetchLocationPreferredSid({
-            adapter,
-            siteId,
-            locationId: sourceLocationId,
-            ...(viaPatchPanel && patchPanelSidId > 0 && patchPanelPort !== ''
-              ? { preferredSwitchSidId: patchPanelSidId, preferredSwitchPort: patchPanelPort }
-              : {}),
-          })
-        : null;
+      const sourceSid = sourceConnectedSidId > 0
+        ? await fetchSidHopById({ adapter, siteId, sidId: sourceConnectedSidId })
+        : sourceLocationId > 0
+          ? await fetchLocationPreferredSid({
+              adapter,
+              siteId,
+              locationId: sourceLocationId,
+              ...(viaPatchPanel && patchPanelSidId > 0 && patchPanelPort !== ''
+                ? { preferredSwitchSidId: patchPanelSidId, preferredSwitchPort: patchPanelPort }
+                : {}),
+            })
+          : null;
 
-      const destinationSid = destinationLocationId > 0
-        ? await fetchLocationPreferredSid({
-            adapter,
-            siteId,
-            locationId: destinationLocationId,
-          })
-        : null;
+      const destinationSid = destinationConnectedSidId > 0
+        ? await fetchSidHopById({ adapter, siteId, sidId: destinationConnectedSidId })
+        : destinationLocationId > 0
+          ? await fetchLocationPreferredSid({
+              adapter,
+              siteId,
+              locationId: destinationLocationId,
+            })
+          : null;
 
       const patchPanelSid = viaPatchPanel && patchPanelSidId > 0
         ? await fetchSidHopById({ adapter, siteId, sidId: patchPanelSidId })
@@ -5276,11 +5295,64 @@ router.get(
 
       const hops: any[] = [];
 
+      const buildUnknownEndpointHop = async (params: {
+        locationId: number;
+        hostname: string;
+        connectedPort: string;
+      }) => {
+        const { locationId, hostname, connectedPort } = params;
+        let locationText: string | null = null;
+
+        if (locationId > 0) {
+          const locationRows = await adapter.query(
+            `SELECT
+               sl.template_type,
+               sl.floor,
+               sl.suite,
+               sl.\`row\` as \`row\`,
+               sl.rack,
+               sl.area,
+               COALESCE(NULLIF(TRIM(sl.label), ''), si.code) AS effective_label
+             FROM site_locations sl
+             JOIN sites si ON si.id = sl.site_id
+             WHERE sl.site_id = ? AND sl.id = ?
+             LIMIT 1`,
+            [siteId, locationId]
+          );
+          const loc = (locationRows?.[0] as any) ?? null;
+          locationText = loc ? formatRackLocationPath(loc) : null;
+        }
+
+        return {
+          hostname: hostname || 'Unknown endpoint',
+          sidId: null,
+          manufacturer: null,
+          modelName: null,
+          rackLocation: locationText,
+          rackU: null,
+          rackUnits: null,
+          portLabel: connectedPort !== '' ? `Port ${connectedPort}` : null,
+          nicType: null,
+        };
+      };
+
       if (sourceSid) {
         hops.push(
           mapSidRowToTraceHop(sourceSid, {
-            portLabel: String(sourceSid.switch_port ?? '').trim() !== '' ? `Port ${String(sourceSid.switch_port).trim()}` : null,
+            portLabel: sourceConnectedPort !== ''
+              ? `Port ${sourceConnectedPort}`
+              : String(sourceSid.switch_port ?? '').trim() !== ''
+                ? `Port ${String(sourceSid.switch_port).trim()}`
+                : null,
             nicType: String(sourceSid.nic_type ?? '').trim() || null,
+          })
+        );
+      } else if (sourceConnectedHostname !== '' || sourceConnectedPort !== '') {
+        hops.push(
+          await buildUnknownEndpointHop({
+            locationId: sourceLocationId,
+            hostname: sourceConnectedHostname,
+            connectedPort: sourceConnectedPort,
           })
         );
       } else if (sourceLocationId > 0) {
@@ -5325,12 +5397,24 @@ router.get(
 
       if (destinationSid) {
         const destHop = mapSidRowToTraceHop(destinationSid, {
-          portLabel: String(destinationSid.switch_port ?? '').trim() !== '' ? `Port ${String(destinationSid.switch_port).trim()}` : null,
+          portLabel: destinationConnectedPort !== ''
+            ? `Port ${destinationConnectedPort}`
+            : String(destinationSid.switch_port ?? '').trim() !== ''
+              ? `Port ${String(destinationSid.switch_port).trim()}`
+              : null,
           nicType: String(destinationSid.nic_type ?? '').trim() || null,
         });
         if (destHop && !hops.some((h) => h && h.sidId === destHop.sidId)) {
           hops.push(destHop);
         }
+      } else if (destinationConnectedHostname !== '' || destinationConnectedPort !== '') {
+        hops.push(
+          await buildUnknownEndpointHop({
+            locationId: destinationLocationId,
+            hostname: destinationConnectedHostname,
+            connectedPort: destinationConnectedPort,
+          })
+        );
       } else if (destinationLocationId > 0) {
         const locationRows = await adapter.query(
           `SELECT

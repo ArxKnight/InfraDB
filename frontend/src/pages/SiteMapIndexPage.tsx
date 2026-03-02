@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Loader2, Map } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import { apiClient } from '../lib/api';
 import type { MapCableTraceHop, MapRackElevation, MapRackOption } from '../types';
 import { Alert, AlertDescription } from '../components/ui/alert';
@@ -159,14 +159,16 @@ const SiteMapIndexPage: React.FC = () => {
 
   return (
     <div className="pt-4 space-y-6 mx-auto w-full max-w-7xl xl:max-w-[98rem]">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" onClick={() => navigate(`/sites/${siteId}`)}>
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to Site Hub
-        </Button>
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><Map className="h-6 w-6" />MapIndex</h1>
-          <p className="text-muted-foreground">Rack View & Cable Trace{siteName ? ` — ${siteName}` : ''}</p>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-4">
+          <Button variant="ghost" onClick={() => navigate(`/sites/${siteId}`)}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Site Hub
+          </Button>
+          <div>
+            <h1 className="text-2xl font-bold">{siteName ?? 'Site'}</h1>
+            <p className="text-muted-foreground">MAPIndex</p>
+          </div>
         </div>
       </div>
 
@@ -197,6 +199,11 @@ const SiteMapIndexPage: React.FC = () => {
               </div>
 
               <div className="rounded-md border max-h-48 overflow-auto divide-y">
+                <div className="grid grid-cols-[1fr_auto_auto] gap-3 p-2 text-xs font-medium text-muted-foreground bg-muted/30 sticky top-0 z-10">
+                  <span>Locations</span>
+                  <span>Rack Size</span>
+                  <span className="sr-only">Select</span>
+                </div>
                 {loadingRackOptions ? (
                   <div className="p-3 text-sm text-muted-foreground flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -206,16 +213,15 @@ const SiteMapIndexPage: React.FC = () => {
                   <div className="p-3 text-sm text-muted-foreground">No rack locations found.</div>
                 ) : (
                   rackOptions.map((rack) => (
-                    <label key={rack.id} className="flex items-center justify-between gap-3 p-2 text-sm cursor-pointer hover:bg-muted/40">
+                    <label key={rack.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 p-2 text-sm cursor-pointer hover:bg-muted/40">
                       <span className="truncate">{rack.rackLocation}</span>
-                      <span className="flex items-center gap-3 shrink-0">
-                        <span className="text-xs text-muted-foreground">{rack.rackSizeU}U</span>
-                        <input
-                          type="checkbox"
-                          checked={selectedRackIds.includes(rack.id)}
-                          onChange={() => toggleRackSelection(rack.id)}
-                        />
-                      </span>
+                      <span className="text-xs text-muted-foreground justify-self-end">{rack.rackSizeU}U</span>
+                      <input
+                        type="checkbox"
+                        className="justify-self-end"
+                        checked={selectedRackIds.includes(rack.id)}
+                        onChange={() => toggleRackSelection(rack.id)}
+                      />
                     </label>
                   ))
                 )}

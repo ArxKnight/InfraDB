@@ -186,7 +186,7 @@ const SiteSidIndexPage: React.FC = () => {
           </Button>
           <div>
             <h1 className="text-2xl font-bold">{siteName ?? 'Site'}</h1>
-            <p className="text-muted-foreground">SID Index</p>
+            <p className="text-muted-foreground">SIDIndex</p>
           </div>
         </div>
 

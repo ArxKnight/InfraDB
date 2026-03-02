@@ -27,6 +27,10 @@ const labelSchema = z.object({
   via_patch_panel: z.boolean().optional(),
   patch_panel_sid_id: z.coerce.number().int().positive('Patch panel is required when enabled').optional(),
   patch_panel_port: z.coerce.number().int().positive('Patch panel port is required when enabled').optional(),
+  source_connected_sid_id: z.coerce.number().int().positive().optional(),
+  source_connected_port: z.string().max(255, 'Source port must be 255 characters or less').optional().or(z.literal('')),
+  destination_connected_sid_id: z.coerce.number().int().positive().optional(),
+  destination_connected_port: z.string().max(255, 'Destination port must be 255 characters or less').optional().or(z.literal('')),
 }).superRefine((data, ctx) => {
   if (data.via_patch_panel) {
     if (!Number.isFinite(Number(data.patch_panel_sid_id)) || Number(data.patch_panel_sid_id) <= 0) {
@@ -43,6 +47,40 @@ const labelSchema = z.object({
         message: 'Patch panel port is required when enabled',
       });
     }
+  }
+
+  const sourceHasSid = Number.isFinite(Number(data.source_connected_sid_id)) && Number(data.source_connected_sid_id) > 0;
+  const sourceHasPort = String(data.source_connected_port ?? '').trim() !== '';
+  if (sourceHasSid && !sourceHasPort) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['source_connected_port'],
+      message: 'Source connected port is required when source SID is set',
+    });
+  }
+  if (!sourceHasSid && sourceHasPort) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['source_connected_sid_id'],
+      message: 'Source connected SID is required when source connected port is set',
+    });
+  }
+
+  const destinationHasSid = Number.isFinite(Number(data.destination_connected_sid_id)) && Number(data.destination_connected_sid_id) > 0;
+  const destinationHasPort = String(data.destination_connected_port ?? '').trim() !== '';
+  if (destinationHasSid && !destinationHasPort) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['destination_connected_port'],
+      message: 'Destination connected port is required when destination SID is set',
+    });
+  }
+  if (!destinationHasSid && destinationHasPort) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['destination_connected_sid_id'],
+      message: 'Destination connected SID is required when destination connected port is set',
+    });
   }
 });
 
@@ -76,6 +114,10 @@ const LabelForm: React.FC<LabelFormProps> = ({
   const [loadingLocations, setLoadingLocations] = useState(siteLocked);
   const [cableTypes, setCableTypes] = useState<CableType[]>([]);
   const [loadingCableTypes, setLoadingCableTypes] = useState(siteLocked);
+  const [siteSids, setSiteSids] = useState<Array<{ id: number; sid_number: string; hostname: string }>>([]);
+  const [endpointPortOptionsBySid, setEndpointPortOptionsBySid] = useState<Record<number, string[]>>({});
+  const [endpointPortLoadingBySid, setEndpointPortLoadingBySid] = useState<Record<number, boolean>>({});
+  const [endpointPortErrorBySid, setEndpointPortErrorBySid] = useState<Record<number, string>>({});
   const [patchPanelSids, setPatchPanelSids] = useState<Array<{ id: number; sid_number: string; hostname: string; maxPorts: number | null }>>([]);
 
   const {
@@ -103,6 +145,16 @@ const LabelForm: React.FC<LabelFormProps> = ({
         Number.isFinite(Number(label?.patch_panel_port)) && Number(label?.patch_panel_port) > 0
           ? Number(label?.patch_panel_port)
           : undefined,
+      source_connected_sid_id:
+        Number.isFinite(Number((label as any)?.source_connected_sid_id)) && Number((label as any)?.source_connected_sid_id) > 0
+          ? Number((label as any)?.source_connected_sid_id)
+          : undefined,
+      source_connected_port: String((label as any)?.source_connected_port ?? ''),
+      destination_connected_sid_id:
+        Number.isFinite(Number((label as any)?.destination_connected_sid_id)) && Number((label as any)?.destination_connected_sid_id) > 0
+          ? Number((label as any)?.destination_connected_sid_id)
+          : undefined,
+      destination_connected_port: String((label as any)?.destination_connected_port ?? ''),
     },
   });
 
@@ -159,6 +211,19 @@ const LabelForm: React.FC<LabelFormProps> = ({
         if (cancelled) return;
         setLocations(locResp.data.locations);
         setCableTypes(ctResp.data.cable_types as any);
+
+        const allSids = (sidsResp.data.sids ?? [])
+          .map((sid: any) => {
+            const sidId = Number(sid?.id ?? 0);
+            const sidNumber = String(sid?.sid_number ?? '').trim();
+            const hostname = String(sid?.hostname ?? '').trim();
+            if (!Number.isFinite(sidId) || sidId <= 0 || sidNumber === '') return null;
+            return { id: sidId, sid_number: sidNumber, hostname };
+          })
+          .filter((item): item is { id: number; sid_number: string; hostname: string } => Boolean(item))
+          .sort((a, b) => a.sid_number.localeCompare(b.sid_number, undefined, { numeric: true, sensitivity: 'base' }));
+
+        setSiteSids(allSids);
 
         const modelMap = new Map<number, { is_patch_panel: boolean; default_patch_panel_port_count: number | null }>();
         for (const model of deviceModelsResp.data.device_models ?? []) {
@@ -224,6 +289,84 @@ const LabelForm: React.FC<LabelFormProps> = ({
   const selectedPatchPanelSidId = Number(watchedValues.patch_panel_sid_id ?? 0);
   const selectedPatchPanel = patchPanelSids.find((sid) => sid.id === selectedPatchPanelSidId) ?? null;
   const selectedPatchPanelPortCount = selectedPatchPanel?.maxPorts ?? null;
+  const sourceConnectedSidId = Number(watchedValues.source_connected_sid_id ?? 0);
+  const destinationConnectedSidId = Number(watchedValues.destination_connected_sid_id ?? 0);
+
+  const normalizeNicPortLabel = React.useCallback((cardName: unknown, nicName: unknown): string => {
+    const card = String(cardName ?? '').trim();
+    const nic = String(nicName ?? '').trim();
+    if (card && nic) return `${card} / ${nic}`;
+    if (nic) return nic;
+    if (card) return card;
+    return '';
+  }, []);
+
+  const loadEndpointPortOptions = React.useCallback(async (sidId: number) => {
+    if (!Number.isFinite(sidId) || sidId <= 0) return;
+    if (endpointPortOptionsBySid[sidId] || endpointPortLoadingBySid[sidId]) return;
+
+    setEndpointPortLoadingBySid((prev) => ({ ...prev, [sidId]: true }));
+    setEndpointPortErrorBySid((prev) => {
+      const next = { ...prev };
+      delete next[sidId];
+      return next;
+    });
+
+    try {
+      const siteId = Number(getValues('site_id'));
+      if (!Number.isFinite(siteId) || siteId <= 0) {
+        throw new Error('Invalid site context for endpoint lookup');
+      }
+
+      const sidResp = await apiClient.getSiteSid(siteId, sidId, { log_view: false });
+      if (!sidResp.success || !sidResp.data?.sid) {
+        throw new Error(sidResp.error || 'Failed to load SID endpoint details');
+      }
+
+      const sid = sidResp.data.sid as any;
+      const isSwitch = Number(sid?.device_model_is_switch ?? 0) === 1 || sid?.device_model_is_switch === true;
+
+      let options: string[] = [];
+      if (isSwitch) {
+        const sidPortCountRaw = Number(sid?.switch_port_count ?? 0);
+        const defaultPortCountRaw = Number(sid?.device_model_default_switch_port_count ?? 0);
+        const maxPorts = Number.isFinite(sidPortCountRaw) && sidPortCountRaw > 0
+          ? Math.floor(sidPortCountRaw)
+          : (Number.isFinite(defaultPortCountRaw) && defaultPortCountRaw > 0 ? Math.floor(defaultPortCountRaw) : 0);
+
+        if (maxPorts > 0) {
+          options = Array.from({ length: maxPorts }, (_, index) => String(index + 1));
+        }
+      } else {
+        const unique = new Set<string>();
+        for (const nic of sidResp.data.nics ?? []) {
+          const label = normalizeNicPortLabel((nic as any)?.card_name, (nic as any)?.name);
+          if (label) unique.add(label);
+        }
+        options = Array.from(unique.values());
+      }
+
+      if (options.length === 0) {
+        throw new Error('Selected SID has no available ports');
+      }
+
+      setEndpointPortOptionsBySid((prev) => ({
+        ...prev,
+        [sidId]: options,
+      }));
+    } catch (err) {
+      setEndpointPortErrorBySid((prev) => ({
+        ...prev,
+        [sidId]: err instanceof Error ? err.message : 'Failed to load endpoint ports',
+      }));
+      setEndpointPortOptionsBySid((prev) => ({
+        ...prev,
+        [sidId]: [],
+      }));
+    } finally {
+      setEndpointPortLoadingBySid((prev) => ({ ...prev, [sidId]: false }));
+    }
+  }, [endpointPortLoadingBySid, endpointPortOptionsBySid, getValues, normalizeNicPortLabel]);
 
   useEffect(() => {
     if (!viaPatchPanel) {
@@ -251,6 +394,48 @@ const LabelForm: React.FC<LabelFormProps> = ({
     setValue,
   ]);
 
+  useEffect(() => {
+    if (sourceConnectedSidId > 0) {
+      void loadEndpointPortOptions(sourceConnectedSidId);
+      return;
+    }
+    setValue('source_connected_port', '', { shouldValidate: true });
+  }, [loadEndpointPortOptions, setValue, sourceConnectedSidId]);
+
+  useEffect(() => {
+    if (destinationConnectedSidId > 0) {
+      void loadEndpointPortOptions(destinationConnectedSidId);
+      return;
+    }
+    setValue('destination_connected_port', '', { shouldValidate: true });
+  }, [destinationConnectedSidId, loadEndpointPortOptions, setValue]);
+
+  const sourcePortOptions = sourceConnectedSidId > 0 ? (endpointPortOptionsBySid[sourceConnectedSidId] ?? []) : [];
+  const sourcePortLoading = sourceConnectedSidId > 0 ? Boolean(endpointPortLoadingBySid[sourceConnectedSidId]) : false;
+  const sourcePortError = sourceConnectedSidId > 0 ? endpointPortErrorBySid[sourceConnectedSidId] : undefined;
+
+  const destinationPortOptions = destinationConnectedSidId > 0 ? (endpointPortOptionsBySid[destinationConnectedSidId] ?? []) : [];
+  const destinationPortLoading = destinationConnectedSidId > 0 ? Boolean(endpointPortLoadingBySid[destinationConnectedSidId]) : false;
+  const destinationPortError = destinationConnectedSidId > 0 ? endpointPortErrorBySid[destinationConnectedSidId] : undefined;
+
+  useEffect(() => {
+    if (sourceConnectedSidId <= 0) return;
+    const currentPort = String(watchedValues.source_connected_port ?? '').trim();
+    if (!currentPort) return;
+    if (!sourcePortOptions.includes(currentPort)) {
+      setValue('source_connected_port', '', { shouldValidate: true });
+    }
+  }, [setValue, sourceConnectedSidId, sourcePortOptions, watchedValues.source_connected_port]);
+
+  useEffect(() => {
+    if (destinationConnectedSidId <= 0) return;
+    const currentPort = String(watchedValues.destination_connected_port ?? '').trim();
+    if (!currentPort) return;
+    if (!destinationPortOptions.includes(currentPort)) {
+      setValue('destination_connected_port', '', { shouldValidate: true });
+    }
+  }, [destinationConnectedSidId, destinationPortOptions, setValue, watchedValues.destination_connected_port]);
+
   const handleFormSubmit = async (data: LabelFormData) => {
     try {
       setError(null);
@@ -268,6 +453,18 @@ const LabelForm: React.FC<LabelFormProps> = ({
           : {}),
         ...(data.via_patch_panel && Number.isFinite(Number(data.patch_panel_port)) && Number(data.patch_panel_port) > 0
           ? { patch_panel_port: Number(data.patch_panel_port) }
+          : {}),
+        ...(Number.isFinite(Number(data.source_connected_sid_id)) && Number(data.source_connected_sid_id) > 0
+          ? { source_connected_sid_id: Number(data.source_connected_sid_id) }
+          : {}),
+        ...(String(data.source_connected_port ?? '').trim() !== ''
+          ? { source_connected_port: String(data.source_connected_port).trim() }
+          : {}),
+        ...(Number.isFinite(Number(data.destination_connected_sid_id)) && Number(data.destination_connected_sid_id) > 0
+          ? { destination_connected_sid_id: Number(data.destination_connected_sid_id) }
+          : {}),
+        ...(String(data.destination_connected_port ?? '').trim() !== ''
+          ? { destination_connected_port: String(data.destination_connected_port).trim() }
           : {}),
       };
       await onSubmit(submitData);
@@ -406,6 +603,127 @@ const LabelForm: React.FC<LabelFormProps> = ({
           <p className="text-xs text-muted-foreground">
             Optional details for reference and troubleshooting
           </p>
+        </div>
+
+        <div className="space-y-3 rounded-md border p-3">
+          <div>
+            <Label>Optional Connected Endpoints</Label>
+            <p className="text-xs text-muted-foreground">Optionally select a SID and then choose a valid port for each end of the cable.</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-3">
+              <div className="text-sm font-medium">Source Endpoint</div>
+
+              <div className="space-y-2">
+                <Label htmlFor="source_connected_sid_id">Source Connected SID</Label>
+                <input type="hidden" {...register('source_connected_sid_id', { valueAsNumber: true })} />
+                <Select
+                  value={Number.isFinite(Number(watchedValues.source_connected_sid_id)) && Number(watchedValues.source_connected_sid_id) > 0
+                    ? String(Number(watchedValues.source_connected_sid_id))
+                    : 'none'}
+                  onValueChange={(value) => {
+                    setValue('source_connected_sid_id', value === 'none' ? undefined : Number(value), { shouldValidate: true });
+                    setValue('source_connected_port', '', { shouldValidate: true });
+                  }}
+                  disabled={isLoading}
+                >
+                  <SelectTrigger id="source_connected_sid_id">
+                    <SelectValue placeholder="Optional SID" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {siteSids.map((sid) => (
+                      <SelectItem key={`src-${sid.id}`} value={String(sid.id)}>
+                        {sid.sid_number}{sid.hostname ? ` — ${sid.hostname}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {errors.source_connected_sid_id && <p className="text-sm text-destructive">{errors.source_connected_sid_id.message}</p>}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="source_connected_port">Source Connected Port</Label>
+                <Select
+                  value={String(watchedValues.source_connected_port ?? '').trim() || 'none'}
+                  onValueChange={(value) => setValue('source_connected_port', value === 'none' ? '' : value, { shouldValidate: true })}
+                  disabled={isLoading || sourceConnectedSidId <= 0 || sourcePortLoading || sourcePortOptions.length === 0}
+                >
+                  <SelectTrigger id="source_connected_port">
+                    <SelectValue placeholder={sourceConnectedSidId > 0 ? 'Select source port' : 'Select source SID first'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {sourcePortOptions.map((port) => (
+                      <SelectItem key={`src-port-${port}`} value={port}>
+                        {port}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {sourcePortLoading && <p className="text-xs text-muted-foreground">Loading source SID ports…</p>}
+                {sourcePortError && <p className="text-xs text-destructive">{sourcePortError}</p>}
+                {errors.source_connected_port && <p className="text-sm text-destructive">{errors.source_connected_port.message}</p>}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="text-sm font-medium">Destination Endpoint</div>
+
+              <div className="space-y-2">
+                <Label htmlFor="destination_connected_sid_id">Destination Connected SID</Label>
+                <input type="hidden" {...register('destination_connected_sid_id', { valueAsNumber: true })} />
+                <Select
+                  value={Number.isFinite(Number(watchedValues.destination_connected_sid_id)) && Number(watchedValues.destination_connected_sid_id) > 0
+                    ? String(Number(watchedValues.destination_connected_sid_id))
+                    : 'none'}
+                  onValueChange={(value) => {
+                    setValue('destination_connected_sid_id', value === 'none' ? undefined : Number(value), { shouldValidate: true });
+                    setValue('destination_connected_port', '', { shouldValidate: true });
+                  }}
+                  disabled={isLoading}
+                >
+                  <SelectTrigger id="destination_connected_sid_id">
+                    <SelectValue placeholder="Optional SID" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {siteSids.map((sid) => (
+                      <SelectItem key={`dst-${sid.id}`} value={String(sid.id)}>
+                        {sid.sid_number}{sid.hostname ? ` — ${sid.hostname}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {errors.destination_connected_sid_id && <p className="text-sm text-destructive">{errors.destination_connected_sid_id.message}</p>}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="destination_connected_port">Destination Connected Port</Label>
+                <Select
+                  value={String(watchedValues.destination_connected_port ?? '').trim() || 'none'}
+                  onValueChange={(value) => setValue('destination_connected_port', value === 'none' ? '' : value, { shouldValidate: true })}
+                  disabled={isLoading || destinationConnectedSidId <= 0 || destinationPortLoading || destinationPortOptions.length === 0}
+                >
+                  <SelectTrigger id="destination_connected_port">
+                    <SelectValue placeholder={destinationConnectedSidId > 0 ? 'Select destination port' : 'Select destination SID first'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {destinationPortOptions.map((port) => (
+                      <SelectItem key={`dst-port-${port}`} value={port}>
+                        {port}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {destinationPortLoading && <p className="text-xs text-muted-foreground">Loading destination SID ports…</p>}
+                {destinationPortError && <p className="text-xs text-destructive">{destinationPortError}</p>}
+                {errors.destination_connected_port && <p className="text-sm text-destructive">{errors.destination_connected_port.message}</p>}
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="space-y-3 rounded-md border p-3">

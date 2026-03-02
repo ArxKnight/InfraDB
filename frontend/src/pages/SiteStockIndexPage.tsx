@@ -75,7 +75,7 @@ const SiteStockIndexPage: React.FC = () => {
           </Button>
           <div>
             <h1 className="text-2xl font-bold">{siteName ?? 'Site'}</h1>
-            <p className="text-muted-foreground">Stock Index</p>
+            <p className="text-muted-foreground">StockIndex</p>
           </div>
         </div>
       </div>

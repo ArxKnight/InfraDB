@@ -26,6 +26,12 @@ const createLabelSchema = z.object({
   via_patch_panel: z.boolean().optional(),
   patch_panel_sid_id: z.coerce.number().int().positive().optional(),
   patch_panel_port: z.coerce.number().int().positive().optional(),
+  source_connected_sid_id: z.coerce.number().int().positive().optional(),
+  source_connected_hostname: z.string().max(255).optional(),
+  source_connected_port: z.string().max(255).optional(),
+  destination_connected_sid_id: z.coerce.number().int().positive().optional(),
+  destination_connected_hostname: z.string().max(255).optional(),
+  destination_connected_port: z.string().max(255).optional(),
 }).superRefine((data, ctx) => {
   if (data.via_patch_panel) {
     if (!Number.isFinite(Number(data.patch_panel_sid_id)) || Number(data.patch_panel_sid_id) <= 0) {
@@ -43,6 +49,40 @@ const createLabelSchema = z.object({
       });
     }
   }
+
+  const sourceHasSid = Number.isFinite(Number(data.source_connected_sid_id)) && Number(data.source_connected_sid_id) > 0;
+  const sourceHasPort = String(data.source_connected_port ?? '').trim() !== '';
+  if (sourceHasSid && !sourceHasPort) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['source_connected_port'],
+      message: 'Source connected port is required when source SID is set',
+    });
+  }
+  if (!sourceHasSid && sourceHasPort) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['source_connected_sid_id'],
+      message: 'Source connected SID is required when source connected port is set',
+    });
+  }
+
+  const destinationHasSid = Number.isFinite(Number(data.destination_connected_sid_id)) && Number(data.destination_connected_sid_id) > 0;
+  const destinationHasPort = String(data.destination_connected_port ?? '').trim() !== '';
+  if (destinationHasSid && !destinationHasPort) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['destination_connected_port'],
+      message: 'Destination connected port is required when destination SID is set',
+    });
+  }
+  if (!destinationHasSid && destinationHasPort) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['destination_connected_sid_id'],
+      message: 'Destination connected SID is required when destination connected port is set',
+    });
+  }
 });
 
 const updateLabelSchema = z.object({
@@ -54,7 +94,132 @@ const updateLabelSchema = z.object({
   via_patch_panel: z.boolean().optional(),
   patch_panel_sid_id: z.coerce.number().int().positive().optional(),
   patch_panel_port: z.coerce.number().int().positive().optional(),
+  source_connected_sid_id: z.coerce.number().int().positive().optional().nullable(),
+  source_connected_hostname: z.string().max(255).optional().nullable(),
+  source_connected_port: z.string().max(255).optional().nullable(),
+  destination_connected_sid_id: z.coerce.number().int().positive().optional().nullable(),
+  destination_connected_hostname: z.string().max(255).optional().nullable(),
+  destination_connected_port: z.string().max(255).optional().nullable(),
 });
+
+function normalizeNicPortLabel(cardName: unknown, nicName: unknown): string {
+  const card = String(cardName ?? '').trim();
+  const nic = String(nicName ?? '').trim();
+  if (card && nic) return `${card} / ${nic}`;
+  if (nic) return nic;
+  if (card) return card;
+  return '';
+}
+
+async function normalizeConnectedEndpointSelection(input: {
+  site_id: number;
+  connected_sid_id?: number | null | undefined;
+  connected_hostname?: string | null | undefined;
+  connected_port?: string | null | undefined;
+  side: 'Source' | 'Destination';
+}): Promise<{
+  connected_sid_id: number | null;
+  connected_hostname: string | null;
+  connected_port: string | null;
+}> {
+  const connectedSidId = Number(input.connected_sid_id ?? 0);
+  const connectedHostname = String(input.connected_hostname ?? '').trim();
+  const connectedPort = String(input.connected_port ?? '').trim();
+  const hasSid = Number.isFinite(connectedSidId) && connectedSidId > 0;
+  const hasPort = connectedPort !== '';
+
+  if (connectedHostname !== '') {
+    throw new Error(`${input.side} connected hostname is no longer supported. Select a SID and port instead`);
+  }
+
+  if (hasSid && !hasPort) {
+    throw new Error(`${input.side} connected port is required when ${input.side.toLowerCase()} SID is set`);
+  }
+  if (!hasSid && hasPort) {
+    throw new Error(`${input.side} connected SID is required when ${input.side.toLowerCase()} connected port is set`);
+  }
+  if (!hasSid && !hasPort) {
+    return {
+      connected_sid_id: null,
+      connected_hostname: null,
+      connected_port: null,
+    };
+  }
+
+  const adapter = connection.getAdapter();
+  const sidRows = await adapter.query(
+    `SELECT
+      s.id,
+      s.switch_port_count,
+      dm.is_switch,
+      dm.default_switch_port_count
+    FROM sids s
+    LEFT JOIN sid_device_models dm ON dm.id = s.device_model_id
+    WHERE s.id = ? AND s.site_id = ?
+    LIMIT 1`,
+    [connectedSidId, input.site_id]
+  );
+
+  const sidRow = (sidRows?.[0] as any) ?? null;
+  if (!sidRow) {
+    throw new Error(`Selected ${input.side.toLowerCase()} connected SID is invalid for this site`);
+  }
+
+  const isSwitch = Number(sidRow?.is_switch ?? 0) === 1 || sidRow?.is_switch === true;
+  if (isSwitch) {
+    const sidPortCount = Number(sidRow?.switch_port_count ?? 0);
+    const defaultPortCount = Number(sidRow?.default_switch_port_count ?? 0);
+    const maxPorts = Number.isFinite(sidPortCount) && sidPortCount > 0
+      ? Math.floor(sidPortCount)
+      : (Number.isFinite(defaultPortCount) && defaultPortCount > 0 ? Math.floor(defaultPortCount) : null);
+
+    if (!maxPorts || maxPorts < 1) {
+      throw new Error(`${input.side} connected SID has no configured switch port count`);
+    }
+
+    const portNumber = Number(connectedPort);
+    if (!Number.isFinite(portNumber) || !Number.isInteger(portNumber) || portNumber < 1 || portNumber > maxPorts) {
+      throw new Error(`${input.side} connected port must be between 1 and ${maxPorts}`);
+    }
+
+    return {
+      connected_sid_id: connectedSidId,
+      connected_hostname: null,
+      connected_port: String(portNumber),
+    };
+  }
+
+  const nicRows = await adapter.query(
+    `SELECT card_name, name
+     FROM sid_nics
+     WHERE sid_id = ?
+     ORDER BY COALESCE(card_name, ''), name ASC`,
+    [connectedSidId]
+  );
+
+  const nicPortMap = new Map<string, string>();
+  for (const row of nicRows as any[]) {
+    const label = normalizeNicPortLabel((row as any)?.card_name, (row as any)?.name);
+    if (!label) continue;
+    const key = label.toLowerCase();
+    if (!nicPortMap.has(key)) nicPortMap.set(key, label);
+  }
+
+  if (nicPortMap.size === 0) {
+    throw new Error(`${input.side} connected SID has no network cards to select from`);
+  }
+
+  const selectedNic = nicPortMap.get(connectedPort.toLowerCase());
+  if (!selectedNic) {
+    throw new Error(`${input.side} connected port is invalid for selected SID`);
+  }
+
+  return {
+    connected_sid_id: connectedSidId,
+    connected_hostname: null,
+    connected_port: selectedNic,
+  };
+}
 
 async function normalizePatchPanelSelection(
   siteId: number,
@@ -452,6 +617,20 @@ router.post('/', authenticateToken, resolveSiteAccess(req => Number(req.body.sit
       ...(labelDataParsed.patch_panel_sid_id !== undefined ? { patch_panel_sid_id: labelDataParsed.patch_panel_sid_id } : {}),
       ...(labelDataParsed.patch_panel_port !== undefined ? { patch_panel_port: labelDataParsed.patch_panel_port } : {}),
     });
+    const sourceConnected = await normalizeConnectedEndpointSelection({
+      site_id: labelDataParsed.site_id,
+      connected_sid_id: labelDataParsed.source_connected_sid_id,
+      connected_hostname: labelDataParsed.source_connected_hostname,
+      connected_port: labelDataParsed.source_connected_port,
+      side: 'Source',
+    });
+    const destinationConnected = await normalizeConnectedEndpointSelection({
+      site_id: labelDataParsed.site_id,
+      connected_sid_id: labelDataParsed.destination_connected_sid_id,
+      connected_hostname: labelDataParsed.destination_connected_hostname,
+      connected_port: labelDataParsed.destination_connected_port,
+      side: 'Destination',
+    });
     const labelData = {
       site_id: labelDataParsed.site_id,
       source_location_id: labelDataParsed.source_location_id,
@@ -460,6 +639,12 @@ router.post('/', authenticateToken, resolveSiteAccess(req => Number(req.body.sit
       ...(labelDataParsed.notes ? { notes: labelDataParsed.notes } : {}),
       ...(labelDataParsed.zpl_content ? { zpl_content: labelDataParsed.zpl_content } : {}),
       ...patchPanelSelection,
+      source_connected_sid_id: sourceConnected.connected_sid_id,
+      source_connected_hostname: sourceConnected.connected_hostname,
+      source_connected_port: sourceConnected.connected_port,
+      destination_connected_sid_id: destinationConnected.connected_sid_id,
+      destination_connected_hostname: destinationConnected.connected_hostname,
+      destination_connected_port: destinationConnected.connected_port,
     };
 
     // Create label(s)
@@ -564,7 +749,23 @@ router.post('/', authenticateToken, resolveSiteAccess(req => Number(req.body.sit
         error.message === 'Patch panel port is required when enabled' ||
         error.message === 'Selected patch panel SID is invalid for this site' ||
         error.message === 'Selected SID is not a patch panel' ||
-        error.message.startsWith('Patch panel port must be between 1 and ')
+        error.message.startsWith('Patch panel port must be between 1 and ') ||
+        error.message === 'Source connected hostname is no longer supported. Select a SID and port instead' ||
+        error.message === 'Destination connected hostname is no longer supported. Select a SID and port instead' ||
+        error.message === 'Source connected port is required when source SID is set' ||
+        error.message === 'Destination connected port is required when destination SID is set' ||
+        error.message === 'Source connected SID is required when source connected port is set' ||
+        error.message === 'Destination connected SID is required when destination connected port is set' ||
+        error.message === 'Selected source connected SID is invalid for this site' ||
+        error.message === 'Selected destination connected SID is invalid for this site' ||
+        error.message === 'Source connected SID has no configured switch port count' ||
+        error.message === 'Destination connected SID has no configured switch port count' ||
+        error.message.startsWith('Source connected port must be between 1 and ') ||
+        error.message.startsWith('Destination connected port must be between 1 and ') ||
+        error.message === 'Source connected SID has no network cards to select from' ||
+        error.message === 'Destination connected SID has no network cards to select from' ||
+        error.message === 'Source connected port is invalid for selected SID' ||
+        error.message === 'Destination connected port is invalid for selected SID'
       ) {
         return res.status(400).json({
           success: false,
@@ -631,6 +832,48 @@ router.put('/:id', authenticateToken, resolveSiteAccess(req => Number(req.body.s
         })
       : null;
 
+    const sourceConnected =
+      labelDataParsed.source_connected_sid_id !== undefined ||
+      labelDataParsed.source_connected_port !== undefined
+        ? await normalizeConnectedEndpointSelection({
+            site_id: req.site!.id,
+            connected_sid_id:
+              labelDataParsed.source_connected_sid_id !== undefined
+                ? labelDataParsed.source_connected_sid_id
+                : (existing.source_connected_sid_id ?? null),
+            connected_hostname:
+              labelDataParsed.source_connected_hostname !== undefined
+                ? labelDataParsed.source_connected_hostname
+                : null,
+            connected_port:
+              labelDataParsed.source_connected_port !== undefined
+                ? labelDataParsed.source_connected_port
+                : (existing.source_connected_port ?? null),
+            side: 'Source',
+          })
+        : null;
+
+    const destinationConnected =
+      labelDataParsed.destination_connected_sid_id !== undefined ||
+      labelDataParsed.destination_connected_port !== undefined
+        ? await normalizeConnectedEndpointSelection({
+            site_id: req.site!.id,
+            connected_sid_id:
+              labelDataParsed.destination_connected_sid_id !== undefined
+                ? labelDataParsed.destination_connected_sid_id
+                : (existing.destination_connected_sid_id ?? null),
+            connected_hostname:
+              labelDataParsed.destination_connected_hostname !== undefined
+                ? labelDataParsed.destination_connected_hostname
+                : null,
+            connected_port:
+              labelDataParsed.destination_connected_port !== undefined
+                ? labelDataParsed.destination_connected_port
+                : (existing.destination_connected_port ?? null),
+            side: 'Destination',
+          })
+        : null;
+
     const labelData = {
       ...(labelDataParsed.source_location_id !== undefined ? { source_location_id: labelDataParsed.source_location_id } : {}),
       ...(labelDataParsed.destination_location_id !== undefined ? { destination_location_id: labelDataParsed.destination_location_id } : {}),
@@ -638,6 +881,20 @@ router.put('/:id', authenticateToken, resolveSiteAccess(req => Number(req.body.s
       ...(labelDataParsed.notes !== undefined ? { notes: labelDataParsed.notes } : {}),
       ...(labelDataParsed.zpl_content !== undefined ? { zpl_content: labelDataParsed.zpl_content } : {}),
       ...(patchPanelSelection ? patchPanelSelection : {}),
+      ...(sourceConnected
+        ? {
+            source_connected_sid_id: sourceConnected.connected_sid_id,
+            source_connected_hostname: sourceConnected.connected_hostname,
+            source_connected_port: sourceConnected.connected_port,
+          }
+        : {}),
+      ...(destinationConnected
+        ? {
+            destination_connected_sid_id: destinationConnected.connected_sid_id,
+            destination_connected_hostname: destinationConnected.connected_hostname,
+            destination_connected_port: destinationConnected.connected_port,
+          }
+        : {}),
     };
 
     // Update label
@@ -695,7 +952,23 @@ router.put('/:id', authenticateToken, resolveSiteAccess(req => Number(req.body.s
         error.message === 'Patch panel port is required when enabled' ||
         error.message === 'Selected patch panel SID is invalid for this site' ||
         error.message === 'Selected SID is not a patch panel' ||
-        error.message.startsWith('Patch panel port must be between 1 and ')
+        error.message.startsWith('Patch panel port must be between 1 and ') ||
+        error.message === 'Source connected hostname is no longer supported. Select a SID and port instead' ||
+        error.message === 'Destination connected hostname is no longer supported. Select a SID and port instead' ||
+        error.message === 'Source connected port is required when source SID is set' ||
+        error.message === 'Destination connected port is required when destination SID is set' ||
+        error.message === 'Source connected SID is required when source connected port is set' ||
+        error.message === 'Destination connected SID is required when destination connected port is set' ||
+        error.message === 'Selected source connected SID is invalid for this site' ||
+        error.message === 'Selected destination connected SID is invalid for this site' ||
+        error.message === 'Source connected SID has no configured switch port count' ||
+        error.message === 'Destination connected SID has no configured switch port count' ||
+        error.message.startsWith('Source connected port must be between 1 and ') ||
+        error.message.startsWith('Destination connected port must be between 1 and ') ||
+        error.message === 'Source connected SID has no network cards to select from' ||
+        error.message === 'Destination connected SID has no network cards to select from' ||
+        error.message === 'Source connected port is invalid for selected SID' ||
+        error.message === 'Destination connected port is invalid for selected SID'
       ) {
         return res.status(400).json({
           success: false,

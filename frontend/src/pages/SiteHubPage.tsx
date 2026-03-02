@@ -309,7 +309,7 @@ const SiteHubPage: React.FC = () => {
                   />
                 </Button>
                 <p className="text-sm text-muted-foreground text-center">
-                  Rack elevations and cable trace for this site
+                  Rack visualisation and cable traces for this site
                 </p>
               </div>
             </div>

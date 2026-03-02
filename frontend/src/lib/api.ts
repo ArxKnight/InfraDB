@@ -303,7 +303,7 @@ class ApiClient {
         rackId: number;
         rackLocation: string;
         rackSizeU: number;
-        occupants: Array<{ uPosition: number; sidId: number; sidNumber: string; hostname: string }>;
+        occupants: Array<{ uPosition: number; rackUnits?: number; sidId: number; sidNumber: string; hostname: string }>;
       }>;
     }>(`/sites/${siteId}/racks/elevation?${searchParams.toString()}`);
   }
@@ -924,6 +924,12 @@ class ApiClient {
     via_patch_panel?: boolean;
     patch_panel_sid_id?: number;
     patch_panel_port?: number;
+    source_connected_sid_id?: number | null;
+    source_connected_hostname?: string | null;
+    source_connected_port?: string | null;
+    destination_connected_sid_id?: number | null;
+    destination_connected_hostname?: string | null;
+    destination_connected_port?: string | null;
   }) {
     return this.request<{ label: any; labels?: any[] }>('/labels', {
       method: 'POST',
@@ -943,6 +949,12 @@ class ApiClient {
       via_patch_panel?: boolean;
       patch_panel_sid_id?: number;
       patch_panel_port?: number;
+      source_connected_sid_id?: number | null;
+      source_connected_hostname?: string | null;
+      source_connected_port?: string | null;
+      destination_connected_sid_id?: number | null;
+      destination_connected_hostname?: string | null;
+      destination_connected_port?: string | null;
     }
   ) {
     return this.request<{ label: any }>(`/labels/${id}`, {

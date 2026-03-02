@@ -13,6 +13,12 @@ export interface CreateLabelData {
   via_patch_panel?: boolean;
   patch_panel_sid_id?: number | null;
   patch_panel_port?: number | null;
+  source_connected_sid_id?: number | null;
+  source_connected_hostname?: string | null;
+  source_connected_port?: string | null;
+  destination_connected_sid_id?: number | null;
+  destination_connected_hostname?: string | null;
+  destination_connected_port?: string | null;
   type?: string;
 }
 
@@ -25,6 +31,12 @@ export interface UpdateLabelData {
   via_patch_panel?: boolean;
   patch_panel_sid_id?: number | null;
   patch_panel_port?: number | null;
+  source_connected_sid_id?: number | null;
+  source_connected_hostname?: string | null;
+  source_connected_port?: string | null;
+  destination_connected_sid_id?: number | null;
+  destination_connected_hostname?: string | null;
+  destination_connected_port?: string | null;
   type?: string;
 }
 
@@ -277,6 +289,12 @@ export class LabelModel {
     let via_patch_panel: boolean | undefined;
     let patch_panel_sid_id: number | null | undefined;
     let patch_panel_port: number | null | undefined;
+    let source_connected_sid_id: number | null | undefined;
+    let source_connected_hostname: string | null | undefined;
+    let source_connected_port: string | null | undefined;
+    let destination_connected_sid_id: number | null | undefined;
+    let destination_connected_hostname: string | null | undefined;
+    let destination_connected_port: string | null | undefined;
 
     if (row.payload_json) {
       try {
@@ -286,6 +304,12 @@ export class LabelModel {
         via_patch_panel = payload.via_patch_panel === true;
         patch_panel_sid_id = payload.patch_panel_sid_id == null ? null : Number(payload.patch_panel_sid_id);
         patch_panel_port = payload.patch_panel_port == null ? null : Number(payload.patch_panel_port);
+        source_connected_sid_id = payload.source_connected_sid_id == null ? null : Number(payload.source_connected_sid_id);
+        source_connected_hostname = payload.source_connected_hostname == null ? null : String(payload.source_connected_hostname);
+        source_connected_port = payload.source_connected_port == null ? null : String(payload.source_connected_port);
+        destination_connected_sid_id = payload.destination_connected_sid_id == null ? null : Number(payload.destination_connected_sid_id);
+        destination_connected_hostname = payload.destination_connected_hostname == null ? null : String(payload.destination_connected_hostname);
+        destination_connected_port = payload.destination_connected_port == null ? null : String(payload.destination_connected_port);
       } catch {
         // ignore
       }
@@ -365,6 +389,12 @@ export class LabelModel {
       ...(via_patch_panel !== undefined ? { via_patch_panel } : {}),
       ...(patch_panel_sid_id !== undefined ? { patch_panel_sid_id } : {}),
       ...(patch_panel_port !== undefined ? { patch_panel_port } : {}),
+      ...(source_connected_sid_id !== undefined ? { source_connected_sid_id } : {}),
+      ...(source_connected_hostname !== undefined ? { source_connected_hostname } : {}),
+      ...(source_connected_port !== undefined ? { source_connected_port } : {}),
+      ...(destination_connected_sid_id !== undefined ? { destination_connected_sid_id } : {}),
+      ...(destination_connected_hostname !== undefined ? { destination_connected_hostname } : {}),
+      ...(destination_connected_port !== undefined ? { destination_connected_port } : {}),
     };
   }
 
@@ -377,6 +407,12 @@ export class LabelModel {
       via_patch_panel,
       patch_panel_sid_id,
       patch_panel_port,
+      source_connected_sid_id,
+      source_connected_hostname,
+      source_connected_port,
+      destination_connected_sid_id,
+      destination_connected_hostname,
+      destination_connected_port,
       type = 'cable',
       source_location_id,
       destination_location_id,
@@ -406,6 +442,12 @@ export class LabelModel {
       via_patch_panel: via_patch_panel === true,
       patch_panel_sid_id: via_patch_panel === true ? (patch_panel_sid_id ?? null) : null,
       patch_panel_port: via_patch_panel === true ? (patch_panel_port ?? null) : null,
+      source_connected_sid_id: source_connected_sid_id ?? null,
+      source_connected_hostname: source_connected_hostname ? String(source_connected_hostname).trim() : null,
+      source_connected_port: source_connected_port ? String(source_connected_port).trim() : null,
+      destination_connected_sid_id: destination_connected_sid_id ?? null,
+      destination_connected_hostname: destination_connected_hostname ? String(destination_connected_hostname).trim() : null,
+      destination_connected_port: destination_connected_port ? String(destination_connected_port).trim() : null,
     };
 
     const result = await this.adapter.execute(
@@ -435,6 +477,12 @@ export class LabelModel {
       via_patch_panel,
       patch_panel_sid_id,
       patch_panel_port,
+      source_connected_sid_id,
+      source_connected_hostname,
+      source_connected_port,
+      destination_connected_sid_id,
+      destination_connected_hostname,
+      destination_connected_port,
       type = 'cable',
       source_location_id,
       destination_location_id,
@@ -474,6 +522,12 @@ export class LabelModel {
       via_patch_panel: via_patch_panel === true,
       patch_panel_sid_id: via_patch_panel === true ? (patch_panel_sid_id ?? null) : null,
       patch_panel_port: via_patch_panel === true ? (patch_panel_port ?? null) : null,
+      source_connected_sid_id: source_connected_sid_id ?? null,
+      source_connected_hostname: source_connected_hostname ? String(source_connected_hostname).trim() : null,
+      source_connected_port: source_connected_port ? String(source_connected_port).trim() : null,
+      destination_connected_sid_id: destination_connected_sid_id ?? null,
+      destination_connected_hostname: destination_connected_hostname ? String(destination_connected_hostname).trim() : null,
+      destination_connected_port: destination_connected_port ? String(destination_connected_port).trim() : null,
     };
 
     let startRef = 1;
@@ -832,7 +886,13 @@ export class LabelModel {
       labelData.zpl_content !== undefined ||
       labelData.via_patch_panel !== undefined ||
       labelData.patch_panel_sid_id !== undefined ||
-      labelData.patch_panel_port !== undefined
+      labelData.patch_panel_port !== undefined ||
+      labelData.source_connected_sid_id !== undefined ||
+      labelData.source_connected_hostname !== undefined ||
+      labelData.source_connected_port !== undefined ||
+      labelData.destination_connected_sid_id !== undefined ||
+      labelData.destination_connected_hostname !== undefined ||
+      labelData.destination_connected_port !== undefined
     ) {
       const existing = await this.findById(id, siteId);
       const existingPayload = existing?.payload_json ? (() => {
@@ -854,6 +914,12 @@ export class LabelModel {
       }
       if (labelData.patch_panel_sid_id !== undefined) payload.patch_panel_sid_id = labelData.patch_panel_sid_id ?? null;
       if (labelData.patch_panel_port !== undefined) payload.patch_panel_port = labelData.patch_panel_port ?? null;
+      if (labelData.source_connected_sid_id !== undefined) payload.source_connected_sid_id = labelData.source_connected_sid_id ?? null;
+      if (labelData.source_connected_hostname !== undefined) payload.source_connected_hostname = labelData.source_connected_hostname ? String(labelData.source_connected_hostname).trim() : null;
+      if (labelData.source_connected_port !== undefined) payload.source_connected_port = labelData.source_connected_port ? String(labelData.source_connected_port).trim() : null;
+      if (labelData.destination_connected_sid_id !== undefined) payload.destination_connected_sid_id = labelData.destination_connected_sid_id ?? null;
+      if (labelData.destination_connected_hostname !== undefined) payload.destination_connected_hostname = labelData.destination_connected_hostname ? String(labelData.destination_connected_hostname).trim() : null;
+      if (labelData.destination_connected_port !== undefined) payload.destination_connected_port = labelData.destination_connected_port ? String(labelData.destination_connected_port).trim() : null;
 
       updates.push('payload_json = ?');
       values.push(JSON.stringify(payload));

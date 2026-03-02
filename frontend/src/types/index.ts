@@ -68,6 +68,12 @@ export interface Label {
   via_patch_panel?: boolean;
   patch_panel_sid_id?: number | null;
   patch_panel_port?: number | null;
+  source_connected_sid_id?: number | null;
+  source_connected_hostname?: string | null;
+  source_connected_port?: string | null;
+  destination_connected_sid_id?: number | null;
+  destination_connected_hostname?: string | null;
+  destination_connected_port?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -88,6 +94,12 @@ export interface CreateLabelData {
   via_patch_panel?: boolean;
   patch_panel_sid_id?: number | null;
   patch_panel_port?: number | null;
+  source_connected_sid_id?: number | null;
+  source_connected_hostname?: string | null;
+  source_connected_port?: string | null;
+  destination_connected_sid_id?: number | null;
+  destination_connected_hostname?: string | null;
+  destination_connected_port?: string | null;
 }
 
 export interface UpdateLabelData {
@@ -99,6 +111,12 @@ export interface UpdateLabelData {
   via_patch_panel?: boolean;
   patch_panel_sid_id?: number | null;
   patch_panel_port?: number | null;
+  source_connected_sid_id?: number | null;
+  source_connected_hostname?: string | null;
+  source_connected_port?: string | null;
+  destination_connected_sid_id?: number | null;
+  destination_connected_hostname?: string | null;
+  destination_connected_port?: string | null;
 }
 
 export interface LabelSearchParams {
@@ -142,6 +160,7 @@ export interface MapRackOption {
 
 export interface MapRackOccupant {
   uPosition: number;
+  rackUnits?: number;
   sidId: number;
   sidNumber: string;
   hostname: string;

@@ -1319,7 +1319,7 @@ const SiteSidAdminPage: React.FC = () => {
                 />
               </div>
               <div className="flex items-center justify-between rounded-md border p-3">
-                <Label htmlFor="edit-device-is-switch">Is Switch Model</Label>
+                <Label htmlFor="edit-device-is-switch">Is a Switch or Router?</Label>
                 <Switch
                   id="edit-device-is-switch"
                   checked={editDeviceIsSwitch}
@@ -1351,7 +1351,7 @@ const SiteSidAdminPage: React.FC = () => {
                 </div>
               )}
               <div className="flex items-center justify-between rounded-md border p-3">
-                <Label htmlFor="edit-device-is-patch-panel">Is Patch Panel Model</Label>
+                <Label htmlFor="edit-device-is-patch-panel">Is a Patch Panel?</Label>
                 <Switch
                   id="edit-device-is-patch-panel"
                   checked={editDeviceIsPatchPanel}
@@ -1789,7 +1789,7 @@ const SiteSidAdminPage: React.FC = () => {
                 />
               </div>
               <div className="flex items-center justify-between rounded-md border p-3">
-                <Label htmlFor="add-device-is-switch">Is Switch Model</Label>
+                <Label htmlFor="add-device-is-switch">Is a Switch or Router?</Label>
                 <Switch
                   id="add-device-is-switch"
                   checked={newDeviceIsSwitch}
@@ -1822,7 +1822,7 @@ const SiteSidAdminPage: React.FC = () => {
                 </div>
               )}
               <div className="flex items-center justify-between rounded-md border p-3">
-                <Label htmlFor="add-device-is-patch-panel">Is Patch Panel Model</Label>
+                <Label htmlFor="add-device-is-patch-panel">Is a Patch Panel?</Label>
                 <Switch
                   id="add-device-is-patch-panel"
                   checked={newDeviceIsPatchPanel}

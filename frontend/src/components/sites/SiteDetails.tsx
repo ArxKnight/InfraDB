@@ -290,7 +290,7 @@ const SiteDetails: React.FC<SiteDetailsProps> = ({
           </Button>
           <div>
             <h1 className="text-2xl font-bold">{site.name}</h1>
-            <p className="text-muted-foreground">Cable Index</p>
+            <p className="text-muted-foreground">CableIndex</p>
           </div>
         </div>
 
