@@ -36,6 +36,7 @@ interface LabelDatabaseProps {
   onCreateLabel?: () => void;
   initialSiteId?: number;
   fixedSiteId?: number;
+  openReferenceNumber?: string;
   refreshToken?: number;
   onLabelsChanged?: () => void;
   siteCode?: string;
@@ -47,6 +48,7 @@ const LabelDatabase: React.FC<LabelDatabaseProps> = ({
   onCreateLabel,
   initialSiteId,
   fixedSiteId,
+  openReferenceNumber,
   refreshToken,
   onLabelsChanged,
   siteCode,
@@ -71,6 +73,15 @@ const LabelDatabase: React.FC<LabelDatabaseProps> = ({
   const [cableTypes, setCableTypes] = useState<CableType[]>([]);
   const [loadingCableTypes, setLoadingCableTypes] = useState(false);
 
+  const normalizeRefQuery = useCallback((value: string): string => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    const match = raw.match(/(\d{1,})$/);
+    return match ? match[1].padStart(4, '0') : raw.replace(/^#/, '').trim();
+  }, []);
+
+  const [pendingOpenRef, setPendingOpenRef] = useState<string>(() => normalizeRefQuery(openReferenceNumber || ''));
+
   useEffect(() => {
     if (!multiSelectEnabled && selectedLabels.size > 0) {
       setSelectedLabels(new Set());
@@ -87,7 +98,7 @@ const LabelDatabase: React.FC<LabelDatabaseProps> = ({
   const [searchParams, setSearchParams] = useState<LabelSearchParams>({
     search: '',
     site_id: fixedSiteId || 0,
-    reference_number: '',
+    reference_number: openReferenceNumber || '',
     source_location_id: undefined,
     destination_location_id: undefined,
     source_location_label: '',
@@ -158,6 +169,7 @@ const LabelDatabase: React.FC<LabelDatabaseProps> = ({
       setSearchParams(prev => ({
         ...prev,
         site_id: selectedSiteId,
+        reference_number: prev.reference_number,
         source_location_id: undefined,
         destination_location_id: undefined,
         source_location_label: '',
@@ -177,6 +189,17 @@ const LabelDatabase: React.FC<LabelDatabaseProps> = ({
       }));
     }
   }, [selectedSiteId]);
+
+  useEffect(() => {
+    const normalized = normalizeRefQuery(openReferenceNumber || '');
+    setPendingOpenRef(normalized);
+    if (!normalized) return;
+    setSearchParams((prev) => ({
+      ...prev,
+      reference_number: openReferenceNumber,
+      offset: 0,
+    }));
+  }, [normalizeRefQuery, openReferenceNumber]);
 
   // Load site locations for the dropdown filters
   useEffect(() => {
@@ -475,6 +498,27 @@ const LabelDatabase: React.FC<LabelDatabaseProps> = ({
     setDetailsLabel(label);
     setDetailsOpen(true);
   };
+
+  useEffect(() => {
+    if (loading) return;
+    if (!pendingOpenRef) return;
+
+    const normalizeLabelRef = (label: LabelWithSiteInfo) => {
+      if (typeof label.ref_number === 'number' && Number.isFinite(label.ref_number)) {
+        return String(Math.trunc(label.ref_number)).padStart(4, '0');
+      }
+      const raw = String(label.ref_string || label.reference_number || '').trim();
+      const match = raw.match(/(\d{1,})$/);
+      return match ? match[1].padStart(4, '0') : raw.replace(/^#/, '').trim();
+    };
+
+    const matched = labels.find((label) => normalizeLabelRef(label) === pendingOpenRef) || null;
+    if (matched) {
+      setDetailsLabel(matched);
+      setDetailsOpen(true);
+    }
+    setPendingOpenRef('');
+  }, [labels, loading, pendingOpenRef]);
 
   const formatRefForSiteDetails = (label: LabelWithSiteInfo): string => {
     if (typeof label.ref_number === 'number' && Number.isFinite(label.ref_number)) {

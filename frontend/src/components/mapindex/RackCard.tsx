@@ -40,6 +40,34 @@ const RackCard: React.FC<RackCardProps> = ({ siteId, rack }) => {
     return map;
   }, [rack.occupants, rack.rackSizeU]);
 
+  const labelCellByTopU = React.useMemo(() => {
+    const map = new Map<number, { span: number; sidId: number; sidNumber: string; hostname: string }>();
+
+    for (const u of rows) {
+      const occupant = occupantByU.get(u);
+      if (!occupant) continue;
+
+      const above = occupantByU.get(u + 1);
+      if (above === occupant) continue;
+
+      let span = 1;
+      let lowerU = u - 1;
+      while (occupantByU.get(lowerU) === occupant) {
+        span += 1;
+        lowerU -= 1;
+      }
+
+      map.set(u, {
+        span,
+        sidId: occupant.sidId,
+        sidNumber: occupant.sidNumber,
+        hostname: occupant.hostname,
+      });
+    }
+
+    return map;
+  }, [occupantByU, rows]);
+
   return (
     <Card className="min-w-[320px] w-full md:w-[360px]">
       <CardHeader className="pb-2 text-center">
@@ -47,31 +75,31 @@ const RackCard: React.FC<RackCardProps> = ({ siteId, rack }) => {
         <div className="text-xs text-muted-foreground text-center">{rack.rackSizeU}U</div>
       </CardHeader>
       <CardContent>
-        <div className="overflow-auto max-h-[65vh] border rounded-md">
+        <div className="border rounded-md">
           <table className="w-full text-xs">
             <tbody>
               {rows.map((u) => {
                 const occupant = occupantByU.get(u);
-                const label = occupant
-                  ? `${occupant.hostname || `SID-${occupant.sidId}`} (SID: ${occupant.sidNumber || occupant.sidId})`
-                  : '';
+                const labelCell = labelCellByTopU.get(u);
 
                 return (
                   <tr key={`${rack.rackId}-${u}`} className="border-b last:border-b-0">
                     <td className="w-12 px-2 py-1 text-muted-foreground text-center">U{u}</td>
-                    <td className="px-2 py-1 text-center">
-                      {occupant ? (
+                    {!occupant ? (
+                      <td className="px-2 py-1 text-center">
+                        <span className="text-muted-foreground text-center">—</span>
+                      </td>
+                    ) : labelCell ? (
+                      <td rowSpan={labelCell.span} className="px-2 py-1 text-center align-middle">
                         <button
                           type="button"
                           className="inline-flex justify-center w-full text-center underline-offset-2 hover:underline hover:text-primary"
-                          onClick={() => navigate(`/sites/${siteId}/sid/${occupant.sidId}`)}
+                          onClick={() => navigate(`/sites/${siteId}/sid/${labelCell.sidId}`)}
                         >
-                          {label}
+                          {`${labelCell.hostname || `SID-${labelCell.sidId}`} (SID: ${labelCell.sidNumber || labelCell.sidId})`}
                         </button>
-                      ) : (
-                        <span className="text-muted-foreground text-center">—</span>
-                      )}
-                    </td>
+                      </td>
+                    ) : null}
                     <td className="w-12 px-2 py-1 text-muted-foreground text-center">U{u}</td>
                   </tr>
                 );

@@ -522,7 +522,13 @@ const SiteLocationsManager: React.FC<SiteLocationsManagerProps> = ({ siteId, sit
         </Dialog>
 
         <div className="rounded-md border">
-          <div className="border-b px-3 py-2 text-sm font-semibold">Existing Locations</div>
+          <div className="border-b px-3 py-2">
+            <div className="grid grid-cols-[minmax(0,1fr)_120px_80px] items-center gap-3 text-sm font-semibold">
+              <div>Existing Locations</div>
+              <div className="text-center">Rack Size (U)</div>
+              <div className="sr-only">Actions</div>
+            </div>
+          </div>
           {loading ? (
             <div className="p-6 flex items-center gap-2 text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -533,12 +539,16 @@ const SiteLocationsManager: React.FC<SiteLocationsManagerProps> = ({ siteId, sit
           ) : (
             <div className="divide-y">
               {sortedLocations.map((loc) => (
-                <div key={loc.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                <div key={loc.id} className="grid grid-cols-[minmax(0,1fr)_120px_80px] items-center gap-3 px-3 py-2">
                   <div className="min-w-0">
                     <div className="text-sm truncate">{formatLocationDisplay(siteName, siteCode, loc)}</div>
                   </div>
 
-                  <div className="flex items-center gap-1">
+                  <div className="text-sm text-center text-muted-foreground">
+                    {loc.rack_size_u != null ? String(loc.rack_size_u) : '—'}
+                  </div>
+
+                  <div className="flex items-center justify-end gap-1">
                     <Button variant="ghost" size="sm" onClick={() => startEdit(loc)} disabled={working} title="Edit">
                       <Pencil className="h-4 w-4" />
                     </Button>

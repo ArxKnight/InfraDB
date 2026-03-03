@@ -14,6 +14,14 @@ import { Loader2 } from 'lucide-react';
 import apiClient from '../../lib/api';
 import LocationHierarchyDropdown from '../locations/LocationHierarchyDropdown';
 
+const optionalPositiveInt = z.preprocess((value) => {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'number' && Number.isNaN(value)) return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return value;
+  return Math.trunc(parsed);
+}, z.number().int().positive().optional());
+
 const labelSchema = z.object({
   source_location_id: z.coerce.number().min(1, 'Source location is required'),
   destination_location_id: z.coerce.number().min(1, 'Destination location is required'),
@@ -25,62 +33,86 @@ const labelSchema = z.object({
     .optional()
     .or(z.literal('')),
   via_patch_panel: z.boolean().optional(),
-  patch_panel_sid_id: z.coerce.number().int().positive('Patch panel is required when enabled').optional(),
-  patch_panel_port: z.coerce.number().int().positive('Patch panel port is required when enabled').optional(),
-  source_connected_sid_id: z.coerce.number().int().positive().optional(),
+  patch_panel_sid_id: optionalPositiveInt,
+  patch_panel_port: optionalPositiveInt,
+  source_patch_panel_sid_id: optionalPositiveInt,
+  source_patch_panel_port: optionalPositiveInt,
+  destination_patch_panel_sid_id: optionalPositiveInt,
+  destination_patch_panel_port: optionalPositiveInt,
+  use_connected_endpoints: z.boolean().optional(),
+  source_connected_sid_id: optionalPositiveInt,
   source_connected_port: z.string().max(255, 'Source port must be 255 characters or less').optional().or(z.literal('')),
-  destination_connected_sid_id: z.coerce.number().int().positive().optional(),
+  destination_connected_sid_id: optionalPositiveInt,
   destination_connected_port: z.string().max(255, 'Destination port must be 255 characters or less').optional().or(z.literal('')),
 }).superRefine((data, ctx) => {
   if (data.via_patch_panel) {
-    if (!Number.isFinite(Number(data.patch_panel_sid_id)) || Number(data.patch_panel_sid_id) <= 0) {
+    const sourceSid = Number(data.source_patch_panel_sid_id ?? data.patch_panel_sid_id ?? 0);
+    const sourcePort = Number(data.source_patch_panel_port ?? data.patch_panel_port ?? 0);
+    const destinationSid = Number(data.destination_patch_panel_sid_id ?? 0);
+    const destinationPort = Number(data.destination_patch_panel_port ?? 0);
+
+    const sourceHasSid = Number.isFinite(sourceSid) && sourceSid > 0;
+    const sourceHasPort = Number.isFinite(sourcePort) && sourcePort > 0;
+    const destinationHasSid = Number.isFinite(destinationSid) && destinationSid > 0;
+    const destinationHasPort = Number.isFinite(destinationPort) && destinationPort > 0;
+
+    if ((sourceHasSid && !sourceHasPort) || (!sourceHasSid && sourceHasPort)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['patch_panel_sid_id'],
-        message: 'Patch panel is required when enabled',
+        path: ['source_patch_panel_port'],
+        message: 'Source patch panel SID and port must both be set',
       });
     }
-    if (!Number.isFinite(Number(data.patch_panel_port)) || Number(data.patch_panel_port) <= 0) {
+    if ((destinationHasSid && !destinationHasPort) || (!destinationHasSid && destinationHasPort)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['patch_panel_port'],
-        message: 'Patch panel port is required when enabled',
+        path: ['destination_patch_panel_port'],
+        message: 'Destination patch panel SID and port must both be set',
+      });
+    }
+    if (!sourceHasSid && !destinationHasSid) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['source_patch_panel_sid_id'],
+        message: 'At least one patch panel is required when enabled',
       });
     }
   }
 
-  const sourceHasSid = Number.isFinite(Number(data.source_connected_sid_id)) && Number(data.source_connected_sid_id) > 0;
-  const sourceHasPort = String(data.source_connected_port ?? '').trim() !== '';
-  if (sourceHasSid && !sourceHasPort) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['source_connected_port'],
-      message: 'Source connected port is required when source SID is set',
-    });
-  }
-  if (!sourceHasSid && sourceHasPort) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['source_connected_sid_id'],
-      message: 'Source connected SID is required when source connected port is set',
-    });
-  }
+  if (data.use_connected_endpoints) {
+    const sourceHasSid = Number.isFinite(Number(data.source_connected_sid_id)) && Number(data.source_connected_sid_id) > 0;
+    const sourceHasPort = String(data.source_connected_port ?? '').trim() !== '';
+    if (sourceHasSid && !sourceHasPort) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['source_connected_port'],
+        message: 'Source connected port is required when source SID is set',
+      });
+    }
+    if (!sourceHasSid && sourceHasPort) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['source_connected_sid_id'],
+        message: 'Source connected SID is required when source connected port is set',
+      });
+    }
 
-  const destinationHasSid = Number.isFinite(Number(data.destination_connected_sid_id)) && Number(data.destination_connected_sid_id) > 0;
-  const destinationHasPort = String(data.destination_connected_port ?? '').trim() !== '';
-  if (destinationHasSid && !destinationHasPort) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['destination_connected_port'],
-      message: 'Destination connected port is required when destination SID is set',
-    });
-  }
-  if (!destinationHasSid && destinationHasPort) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['destination_connected_sid_id'],
-      message: 'Destination connected SID is required when destination connected port is set',
-    });
+    const destinationHasSid = Number.isFinite(Number(data.destination_connected_sid_id)) && Number(data.destination_connected_sid_id) > 0;
+    const destinationHasPort = String(data.destination_connected_port ?? '').trim() !== '';
+    if (destinationHasSid && !destinationHasPort) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['destination_connected_port'],
+        message: 'Destination connected port is required when destination SID is set',
+      });
+    }
+    if (!destinationHasSid && destinationHasPort) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['destination_connected_sid_id'],
+        message: 'Destination connected SID is required when destination connected port is set',
+      });
+    }
   }
 });
 
@@ -119,6 +151,11 @@ const LabelForm: React.FC<LabelFormProps> = ({
   const [endpointPortLoadingBySid, setEndpointPortLoadingBySid] = useState<Record<number, boolean>>({});
   const [endpointPortErrorBySid, setEndpointPortErrorBySid] = useState<Record<number, string>>({});
   const [patchPanelSids, setPatchPanelSids] = useState<Array<{ id: number; sid_number: string; hostname: string; maxPorts: number | null }>>([]);
+  const hasConnectedEndpointsDefault =
+    (Number.isFinite(Number((label as any)?.source_connected_sid_id)) && Number((label as any)?.source_connected_sid_id) > 0) ||
+    String((label as any)?.source_connected_port ?? '').trim() !== '' ||
+    (Number.isFinite(Number((label as any)?.destination_connected_sid_id)) && Number((label as any)?.destination_connected_sid_id) > 0) ||
+    String((label as any)?.destination_connected_port ?? '').trim() !== '';
 
   const {
     register,
@@ -145,6 +182,23 @@ const LabelForm: React.FC<LabelFormProps> = ({
         Number.isFinite(Number(label?.patch_panel_port)) && Number(label?.patch_panel_port) > 0
           ? Number(label?.patch_panel_port)
           : undefined,
+      source_patch_panel_sid_id:
+        Number.isFinite(Number((label as any)?.source_patch_panel_sid_id)) && Number((label as any)?.source_patch_panel_sid_id) > 0
+          ? Number((label as any)?.source_patch_panel_sid_id)
+          : (Number.isFinite(Number(label?.patch_panel_sid_id)) && Number(label?.patch_panel_sid_id) > 0 ? Number(label?.patch_panel_sid_id) : undefined),
+      source_patch_panel_port:
+        Number.isFinite(Number((label as any)?.source_patch_panel_port)) && Number((label as any)?.source_patch_panel_port) > 0
+          ? Number((label as any)?.source_patch_panel_port)
+          : (Number.isFinite(Number(label?.patch_panel_port)) && Number(label?.patch_panel_port) > 0 ? Number(label?.patch_panel_port) : undefined),
+      destination_patch_panel_sid_id:
+        Number.isFinite(Number((label as any)?.destination_patch_panel_sid_id)) && Number((label as any)?.destination_patch_panel_sid_id) > 0
+          ? Number((label as any)?.destination_patch_panel_sid_id)
+          : undefined,
+      destination_patch_panel_port:
+        Number.isFinite(Number((label as any)?.destination_patch_panel_port)) && Number((label as any)?.destination_patch_panel_port) > 0
+          ? Number((label as any)?.destination_patch_panel_port)
+          : undefined,
+      use_connected_endpoints: Boolean(hasConnectedEndpointsDefault),
       source_connected_sid_id:
         Number.isFinite(Number((label as any)?.source_connected_sid_id)) && Number((label as any)?.source_connected_sid_id) > 0
           ? Number((label as any)?.source_connected_sid_id)
@@ -286,9 +340,13 @@ const LabelForm: React.FC<LabelFormProps> = ({
   }, [getValues, lockedSiteId, lockedSiteCode, lockedSiteName]);
 
   const viaPatchPanel = Boolean(watchedValues.via_patch_panel);
-  const selectedPatchPanelSidId = Number(watchedValues.patch_panel_sid_id ?? 0);
-  const selectedPatchPanel = patchPanelSids.find((sid) => sid.id === selectedPatchPanelSidId) ?? null;
-  const selectedPatchPanelPortCount = selectedPatchPanel?.maxPorts ?? null;
+  const useConnectedEndpoints = Boolean(watchedValues.use_connected_endpoints);
+  const selectedSourcePatchPanelSidId = Number(watchedValues.source_patch_panel_sid_id ?? watchedValues.patch_panel_sid_id ?? 0);
+  const selectedSourcePatchPanel = patchPanelSids.find((sid) => sid.id === selectedSourcePatchPanelSidId) ?? null;
+  const selectedSourcePatchPanelPortCount = selectedSourcePatchPanel?.maxPorts ?? null;
+  const selectedDestinationPatchPanelSidId = Number(watchedValues.destination_patch_panel_sid_id ?? 0);
+  const selectedDestinationPatchPanel = patchPanelSids.find((sid) => sid.id === selectedDestinationPatchPanelSidId) ?? null;
+  const selectedDestinationPatchPanelPortCount = selectedDestinationPatchPanel?.maxPorts ?? null;
   const sourceConnectedSidId = Number(watchedValues.source_connected_sid_id ?? 0);
   const destinationConnectedSidId = Number(watchedValues.destination_connected_sid_id ?? 0);
 
@@ -372,43 +430,74 @@ const LabelForm: React.FC<LabelFormProps> = ({
     if (!viaPatchPanel) {
       setValue('patch_panel_sid_id', undefined, { shouldValidate: true });
       setValue('patch_panel_port', undefined, { shouldValidate: true });
+      setValue('source_patch_panel_sid_id', undefined, { shouldValidate: true });
+      setValue('source_patch_panel_port', undefined, { shouldValidate: true });
+      setValue('destination_patch_panel_sid_id', undefined, { shouldValidate: true });
+      setValue('destination_patch_panel_port', undefined, { shouldValidate: true });
       return;
     }
 
-    if (!selectedPatchPanel) {
+    if (!selectedSourcePatchPanel) {
+      setValue('source_patch_panel_port', undefined, { shouldValidate: true });
       setValue('patch_panel_port', undefined, { shouldValidate: true });
-      return;
+    } else {
+      const currentSourcePort = Number(watchedValues.source_patch_panel_port ?? watchedValues.patch_panel_port ?? 0);
+      if (selectedSourcePatchPanelPortCount && selectedSourcePatchPanelPortCount > 0) {
+        if (!Number.isFinite(currentSourcePort) || currentSourcePort < 1 || currentSourcePort > selectedSourcePatchPanelPortCount) {
+          setValue('source_patch_panel_port', 1, { shouldValidate: true });
+          setValue('patch_panel_port', 1, { shouldValidate: true });
+        }
+      }
     }
 
-    const currentPort = Number(watchedValues.patch_panel_port ?? 0);
-    if (selectedPatchPanelPortCount && selectedPatchPanelPortCount > 0) {
-      if (!Number.isFinite(currentPort) || currentPort < 1 || currentPort > selectedPatchPanelPortCount) {
-        setValue('patch_panel_port', 1, { shouldValidate: true });
+    if (!selectedDestinationPatchPanel) {
+      setValue('destination_patch_panel_port', undefined, { shouldValidate: true });
+    } else {
+      const currentDestinationPort = Number(watchedValues.destination_patch_panel_port ?? 0);
+      if (selectedDestinationPatchPanelPortCount && selectedDestinationPatchPanelPortCount > 0) {
+        if (!Number.isFinite(currentDestinationPort) || currentDestinationPort < 1 || currentDestinationPort > selectedDestinationPatchPanelPortCount) {
+          setValue('destination_patch_panel_port', 1, { shouldValidate: true });
+        }
       }
     }
   }, [
     viaPatchPanel,
-    selectedPatchPanel,
-    selectedPatchPanelPortCount,
+    selectedSourcePatchPanel,
+    selectedSourcePatchPanelPortCount,
+    watchedValues.source_patch_panel_port,
     watchedValues.patch_panel_port,
+    selectedDestinationPatchPanel,
+    selectedDestinationPatchPanelPortCount,
+    watchedValues.destination_patch_panel_port,
     setValue,
   ]);
 
   useEffect(() => {
+    if (!useConnectedEndpoints) {
+      setValue('source_connected_sid_id', undefined, { shouldValidate: true });
+      setValue('source_connected_port', '', { shouldValidate: true });
+      setValue('destination_connected_sid_id', undefined, { shouldValidate: true });
+      setValue('destination_connected_port', '', { shouldValidate: true });
+    }
+  }, [setValue, useConnectedEndpoints]);
+
+  useEffect(() => {
+    if (!useConnectedEndpoints) return;
     if (sourceConnectedSidId > 0) {
       void loadEndpointPortOptions(sourceConnectedSidId);
       return;
     }
     setValue('source_connected_port', '', { shouldValidate: true });
-  }, [loadEndpointPortOptions, setValue, sourceConnectedSidId]);
+  }, [loadEndpointPortOptions, setValue, sourceConnectedSidId, useConnectedEndpoints]);
 
   useEffect(() => {
+    if (!useConnectedEndpoints) return;
     if (destinationConnectedSidId > 0) {
       void loadEndpointPortOptions(destinationConnectedSidId);
       return;
     }
     setValue('destination_connected_port', '', { shouldValidate: true });
-  }, [destinationConnectedSidId, loadEndpointPortOptions, setValue]);
+  }, [destinationConnectedSidId, loadEndpointPortOptions, setValue, useConnectedEndpoints]);
 
   const sourcePortOptions = sourceConnectedSidId > 0 ? (endpointPortOptionsBySid[sourceConnectedSidId] ?? []) : [];
   const sourcePortLoading = sourceConnectedSidId > 0 ? Boolean(endpointPortLoadingBySid[sourceConnectedSidId]) : false;
@@ -422,19 +511,23 @@ const LabelForm: React.FC<LabelFormProps> = ({
     if (sourceConnectedSidId <= 0) return;
     const currentPort = String(watchedValues.source_connected_port ?? '').trim();
     if (!currentPort) return;
+    const sourceOptionsLoaded = Object.prototype.hasOwnProperty.call(endpointPortOptionsBySid, sourceConnectedSidId);
+    if (!sourceOptionsLoaded) return;
     if (!sourcePortOptions.includes(currentPort)) {
       setValue('source_connected_port', '', { shouldValidate: true });
     }
-  }, [setValue, sourceConnectedSidId, sourcePortOptions, watchedValues.source_connected_port]);
+  }, [endpointPortOptionsBySid, setValue, sourceConnectedSidId, sourcePortOptions, watchedValues.source_connected_port]);
 
   useEffect(() => {
     if (destinationConnectedSidId <= 0) return;
     const currentPort = String(watchedValues.destination_connected_port ?? '').trim();
     if (!currentPort) return;
+    const destinationOptionsLoaded = Object.prototype.hasOwnProperty.call(endpointPortOptionsBySid, destinationConnectedSidId);
+    if (!destinationOptionsLoaded) return;
     if (!destinationPortOptions.includes(currentPort)) {
       setValue('destination_connected_port', '', { shouldValidate: true });
     }
-  }, [destinationConnectedSidId, destinationPortOptions, setValue, watchedValues.destination_connected_port]);
+  }, [destinationConnectedSidId, destinationPortOptions, endpointPortOptionsBySid, setValue, watchedValues.destination_connected_port]);
 
   const handleFormSubmit = async (data: LabelFormData) => {
     try {
@@ -454,16 +547,28 @@ const LabelForm: React.FC<LabelFormProps> = ({
         ...(data.via_patch_panel && Number.isFinite(Number(data.patch_panel_port)) && Number(data.patch_panel_port) > 0
           ? { patch_panel_port: Number(data.patch_panel_port) }
           : {}),
-        ...(Number.isFinite(Number(data.source_connected_sid_id)) && Number(data.source_connected_sid_id) > 0
+        ...(data.via_patch_panel && Number.isFinite(Number(data.source_patch_panel_sid_id)) && Number(data.source_patch_panel_sid_id) > 0
+          ? { source_patch_panel_sid_id: Number(data.source_patch_panel_sid_id), patch_panel_sid_id: Number(data.source_patch_panel_sid_id) }
+          : {}),
+        ...(data.via_patch_panel && Number.isFinite(Number(data.source_patch_panel_port)) && Number(data.source_patch_panel_port) > 0
+          ? { source_patch_panel_port: Number(data.source_patch_panel_port), patch_panel_port: Number(data.source_patch_panel_port) }
+          : {}),
+        ...(data.via_patch_panel && Number.isFinite(Number(data.destination_patch_panel_sid_id)) && Number(data.destination_patch_panel_sid_id) > 0
+          ? { destination_patch_panel_sid_id: Number(data.destination_patch_panel_sid_id) }
+          : {}),
+        ...(data.via_patch_panel && Number.isFinite(Number(data.destination_patch_panel_port)) && Number(data.destination_patch_panel_port) > 0
+          ? { destination_patch_panel_port: Number(data.destination_patch_panel_port) }
+          : {}),
+        ...(data.use_connected_endpoints && Number.isFinite(Number(data.source_connected_sid_id)) && Number(data.source_connected_sid_id) > 0
           ? { source_connected_sid_id: Number(data.source_connected_sid_id) }
           : {}),
-        ...(String(data.source_connected_port ?? '').trim() !== ''
+        ...(data.use_connected_endpoints && String(data.source_connected_port ?? '').trim() !== ''
           ? { source_connected_port: String(data.source_connected_port).trim() }
           : {}),
-        ...(Number.isFinite(Number(data.destination_connected_sid_id)) && Number(data.destination_connected_sid_id) > 0
+        ...(data.use_connected_endpoints && Number.isFinite(Number(data.destination_connected_sid_id)) && Number(data.destination_connected_sid_id) > 0
           ? { destination_connected_sid_id: Number(data.destination_connected_sid_id) }
           : {}),
-        ...(String(data.destination_connected_port ?? '').trim() !== ''
+        ...(data.use_connected_endpoints && String(data.destination_connected_port ?? '').trim() !== ''
           ? { destination_connected_port: String(data.destination_connected_port).trim() }
           : {}),
       };
@@ -510,6 +615,7 @@ const LabelForm: React.FC<LabelFormProps> = ({
         {/* Always register site_id so it is included in submission */}
         <input type="hidden" {...register('site_id', { valueAsNumber: true })} />
         <input type="hidden" {...register('via_patch_panel')} />
+        <input type="hidden" {...register('use_connected_endpoints')} />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
@@ -611,6 +717,23 @@ const LabelForm: React.FC<LabelFormProps> = ({
             <p className="text-xs text-muted-foreground">Optionally select a SID and then choose a valid port for each end of the cable.</p>
           </div>
 
+          <div className="space-y-3 border-t pt-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="use_connected_endpoints">Use Optional Connected Endpoints?</Label>
+                <p className="text-xs text-muted-foreground">Enable to define source and destination connected SID/port metadata.</p>
+              </div>
+              <Switch
+                id="use_connected_endpoints"
+                checked={useConnectedEndpoints}
+                onCheckedChange={(checked) => setValue('use_connected_endpoints', Boolean(checked), { shouldValidate: true })}
+                disabled={isLoading}
+                aria-label="Use Optional Connected Endpoints?"
+              />
+            </div>
+          </div>
+
+          {useConnectedEndpoints && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-3">
               <div className="text-sm font-medium">Source Endpoint</div>
@@ -724,91 +847,176 @@ const LabelForm: React.FC<LabelFormProps> = ({
               </div>
             </div>
           </div>
-        </div>
-
-        <div className="space-y-3 rounded-md border p-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label htmlFor="via_patch_panel">Runs via Patch Panel</Label>
-              <p className="text-xs text-muted-foreground">Enable to attach this cable run to a patch panel and port.</p>
-            </div>
-            <Switch
-              id="via_patch_panel"
-              checked={viaPatchPanel}
-              onCheckedChange={(checked) => setValue('via_patch_panel', Boolean(checked), { shouldValidate: true })}
-              disabled={isLoading}
-              aria-label="Runs via patch panel"
-            />
-          </div>
-
-          {viaPatchPanel && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="patch_panel_sid_id">Patch Panel *</Label>
-                <input type="hidden" {...register('patch_panel_sid_id', { valueAsNumber: true })} />
-                <Select
-                  value={selectedPatchPanelSidId > 0 ? String(selectedPatchPanelSidId) : ''}
-                  onValueChange={(value) => {
-                    setValue('patch_panel_sid_id', Number(value), { shouldValidate: true });
-                    setValue('patch_panel_port', undefined, { shouldValidate: true });
-                  }}
-                  disabled={isLoading || patchPanelSids.length === 0}
-                >
-                  <SelectTrigger id="patch_panel_sid_id">
-                    <SelectValue placeholder={patchPanelSids.length ? 'Select a patch panel SID' : 'No patch panel SIDs available'} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {patchPanelSids.map((sid) => (
-                      <SelectItem key={sid.id} value={String(sid.id)}>
-                        {sid.sid_number}
-                        {sid.hostname ? ` — ${sid.hostname}` : ''}
-                        {sid.maxPorts ? ` (${sid.maxPorts} ports)` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {errors.patch_panel_sid_id && (
-                  <p className="text-sm text-destructive">{errors.patch_panel_sid_id.message}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="patch_panel_port">Patch Panel Port *</Label>
-                <input type="hidden" {...register('patch_panel_port', { valueAsNumber: true })} />
-                <Select
-                  value={Number.isFinite(Number(watchedValues.patch_panel_port)) && Number(watchedValues.patch_panel_port) > 0
-                    ? String(Number(watchedValues.patch_panel_port))
-                    : ''}
-                  onValueChange={(value) => setValue('patch_panel_port', Number(value), { shouldValidate: true })}
-                  disabled={
-                    isLoading ||
-                    !selectedPatchPanel ||
-                    !selectedPatchPanelPortCount ||
-                    selectedPatchPanelPortCount < 1
-                  }
-                >
-                  <SelectTrigger id="patch_panel_port">
-                    <SelectValue placeholder="Select patch panel port" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {selectedPatchPanelPortCount && selectedPatchPanelPortCount > 0
-                      ? Array.from({ length: selectedPatchPanelPortCount }, (_, index) => index + 1).map((port) => (
-                          <SelectItem key={port} value={String(port)}>
-                            Port {port}
-                          </SelectItem>
-                        ))
-                      : null}
-                  </SelectContent>
-                </Select>
-                {selectedPatchPanel && (!selectedPatchPanelPortCount || selectedPatchPanelPortCount < 1) && (
-                  <p className="text-xs text-muted-foreground">Selected patch panel has no configured port count.</p>
-                )}
-                {errors.patch_panel_port && (
-                  <p className="text-sm text-destructive">{errors.patch_panel_port.message}</p>
-                )}
-              </div>
-            </div>
           )}
+
+          <div className="space-y-3 border-t pt-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="via_patch_panel">Does the cable run via Patch Panel/s?</Label>
+                <p className="text-xs text-muted-foreground">Enable to attach this cable run to a patch panel and port.</p>
+              </div>
+              <Switch
+                id="via_patch_panel"
+                checked={viaPatchPanel}
+                onCheckedChange={(checked) => setValue('via_patch_panel', Boolean(checked), { shouldValidate: true })}
+                disabled={isLoading}
+                aria-label="Does the cable run via Patch Panel/s?"
+              />
+            </div>
+
+            {viaPatchPanel && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="source_patch_panel_sid_id">Source Patch Panel</Label>
+                    <input type="hidden" {...register('source_patch_panel_sid_id', { valueAsNumber: true })} />
+                    <input type="hidden" {...register('patch_panel_sid_id', { valueAsNumber: true })} />
+                    <Select
+                      value={selectedSourcePatchPanelSidId > 0 ? String(selectedSourcePatchPanelSidId) : ''}
+                      onValueChange={(value) => {
+                        const parsed = Number(value);
+                        setValue('source_patch_panel_sid_id', parsed, { shouldValidate: true });
+                        setValue('patch_panel_sid_id', parsed, { shouldValidate: true });
+                        setValue('source_patch_panel_port', undefined, { shouldValidate: true });
+                        setValue('patch_panel_port', undefined, { shouldValidate: true });
+                      }}
+                      disabled={isLoading || patchPanelSids.length === 0}
+                    >
+                      <SelectTrigger id="source_patch_panel_sid_id">
+                        <SelectValue placeholder={patchPanelSids.length ? 'Select source patch panel SID' : 'No patch panel SIDs available'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {patchPanelSids.map((sid) => (
+                          <SelectItem key={`src-pp-${sid.id}`} value={String(sid.id)}>
+                            {sid.sid_number}
+                            {sid.hostname ? ` — ${sid.hostname}` : ''}
+                            {sid.maxPorts ? ` (${sid.maxPorts} ports)` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {errors.source_patch_panel_sid_id && (
+                      <p className="text-sm text-destructive">{errors.source_patch_panel_sid_id.message}</p>
+                    )}
+                    {errors.patch_panel_sid_id && (
+                      <p className="text-sm text-destructive">{errors.patch_panel_sid_id.message}</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="source_patch_panel_port">Source Patch Panel Port</Label>
+                    <input type="hidden" {...register('source_patch_panel_port', { valueAsNumber: true })} />
+                    <input type="hidden" {...register('patch_panel_port', { valueAsNumber: true })} />
+                    <Select
+                      value={Number.isFinite(Number(watchedValues.source_patch_panel_port ?? watchedValues.patch_panel_port)) && Number(watchedValues.source_patch_panel_port ?? watchedValues.patch_panel_port) > 0
+                        ? String(Number(watchedValues.source_patch_panel_port ?? watchedValues.patch_panel_port))
+                        : ''}
+                      onValueChange={(value) => {
+                        const parsed = Number(value);
+                        setValue('source_patch_panel_port', parsed, { shouldValidate: true });
+                        setValue('patch_panel_port', parsed, { shouldValidate: true });
+                      }}
+                      disabled={
+                        isLoading ||
+                        !selectedSourcePatchPanel ||
+                        !selectedSourcePatchPanelPortCount ||
+                        selectedSourcePatchPanelPortCount < 1
+                      }
+                    >
+                      <SelectTrigger id="source_patch_panel_port">
+                        <SelectValue placeholder="Select source patch panel port" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {selectedSourcePatchPanelPortCount && selectedSourcePatchPanelPortCount > 0
+                          ? Array.from({ length: selectedSourcePatchPanelPortCount }, (_, index) => index + 1).map((port) => (
+                              <SelectItem key={`src-pp-port-${port}`} value={String(port)}>
+                                Port {port}
+                              </SelectItem>
+                            ))
+                          : null}
+                      </SelectContent>
+                    </Select>
+                    {selectedSourcePatchPanel && (!selectedSourcePatchPanelPortCount || selectedSourcePatchPanelPortCount < 1) && (
+                      <p className="text-xs text-muted-foreground">Selected source patch panel has no configured port count.</p>
+                    )}
+                    {errors.source_patch_panel_port && (
+                      <p className="text-sm text-destructive">{errors.source_patch_panel_port.message}</p>
+                    )}
+                    {errors.patch_panel_port && (
+                      <p className="text-sm text-destructive">{errors.patch_panel_port.message}</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="destination_patch_panel_sid_id">Destination Patch Panel</Label>
+                    <input type="hidden" {...register('destination_patch_panel_sid_id', { valueAsNumber: true })} />
+                    <Select
+                      value={selectedDestinationPatchPanelSidId > 0 ? String(selectedDestinationPatchPanelSidId) : ''}
+                      onValueChange={(value) => {
+                        setValue('destination_patch_panel_sid_id', Number(value), { shouldValidate: true });
+                        setValue('destination_patch_panel_port', undefined, { shouldValidate: true });
+                      }}
+                      disabled={isLoading || patchPanelSids.length === 0}
+                    >
+                      <SelectTrigger id="destination_patch_panel_sid_id">
+                        <SelectValue placeholder={patchPanelSids.length ? 'Select destination patch panel SID' : 'No patch panel SIDs available'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {patchPanelSids.map((sid) => (
+                          <SelectItem key={`dst-pp-${sid.id}`} value={String(sid.id)}>
+                            {sid.sid_number}
+                            {sid.hostname ? ` — ${sid.hostname}` : ''}
+                            {sid.maxPorts ? ` (${sid.maxPorts} ports)` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {errors.destination_patch_panel_sid_id && (
+                      <p className="text-sm text-destructive">{errors.destination_patch_panel_sid_id.message}</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="destination_patch_panel_port">Destination Patch Panel Port</Label>
+                    <input type="hidden" {...register('destination_patch_panel_port', { valueAsNumber: true })} />
+                    <Select
+                      value={Number.isFinite(Number(watchedValues.destination_patch_panel_port)) && Number(watchedValues.destination_patch_panel_port) > 0
+                        ? String(Number(watchedValues.destination_patch_panel_port))
+                        : ''}
+                      onValueChange={(value) => setValue('destination_patch_panel_port', Number(value), { shouldValidate: true })}
+                      disabled={
+                        isLoading ||
+                        !selectedDestinationPatchPanel ||
+                        !selectedDestinationPatchPanelPortCount ||
+                        selectedDestinationPatchPanelPortCount < 1
+                      }
+                    >
+                      <SelectTrigger id="destination_patch_panel_port">
+                        <SelectValue placeholder="Select destination patch panel port" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {selectedDestinationPatchPanelPortCount && selectedDestinationPatchPanelPortCount > 0
+                          ? Array.from({ length: selectedDestinationPatchPanelPortCount }, (_, index) => index + 1).map((port) => (
+                              <SelectItem key={`dst-pp-port-${port}`} value={String(port)}>
+                                Port {port}
+                              </SelectItem>
+                            ))
+                          : null}
+                      </SelectContent>
+                    </Select>
+                    {selectedDestinationPatchPanel && (!selectedDestinationPatchPanelPortCount || selectedDestinationPatchPanelPortCount < 1) && (
+                      <p className="text-xs text-muted-foreground">Selected destination patch panel has no configured port count.</p>
+                    )}
+                    {errors.destination_patch_panel_port && (
+                      <p className="text-sm text-destructive">{errors.destination_patch_panel_port.message}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex justify-end space-x-2">

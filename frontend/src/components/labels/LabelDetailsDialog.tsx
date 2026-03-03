@@ -95,6 +95,30 @@ const LabelDetailsDialog: React.FC<LabelDetailsDialogProps> = ({
       ...(Number.isFinite(Number(data.patch_panel_port)) && Number(data.patch_panel_port) > 0
         ? { patch_panel_port: Number(data.patch_panel_port) }
         : {}),
+      ...(Number.isFinite(Number(data.source_patch_panel_sid_id)) && Number(data.source_patch_panel_sid_id) > 0
+        ? { source_patch_panel_sid_id: Number(data.source_patch_panel_sid_id), patch_panel_sid_id: Number(data.source_patch_panel_sid_id) }
+        : {}),
+      ...(Number.isFinite(Number(data.source_patch_panel_port)) && Number(data.source_patch_panel_port) > 0
+        ? { source_patch_panel_port: Number(data.source_patch_panel_port), patch_panel_port: Number(data.source_patch_panel_port) }
+        : {}),
+      ...(Number.isFinite(Number(data.destination_patch_panel_sid_id)) && Number(data.destination_patch_panel_sid_id) > 0
+        ? { destination_patch_panel_sid_id: Number(data.destination_patch_panel_sid_id) }
+        : {}),
+      ...(Number.isFinite(Number(data.destination_patch_panel_port)) && Number(data.destination_patch_panel_port) > 0
+        ? { destination_patch_panel_port: Number(data.destination_patch_panel_port) }
+        : {}),
+      ...(Number.isFinite(Number(data.source_connected_sid_id)) && Number(data.source_connected_sid_id) > 0
+        ? { source_connected_sid_id: Number(data.source_connected_sid_id) }
+        : {}),
+      ...(String(data.source_connected_port ?? '').trim() !== ''
+        ? { source_connected_port: String(data.source_connected_port).trim() }
+        : {}),
+      ...(Number.isFinite(Number(data.destination_connected_sid_id)) && Number(data.destination_connected_sid_id) > 0
+        ? { destination_connected_sid_id: Number(data.destination_connected_sid_id) }
+        : {}),
+      ...(String(data.destination_connected_port ?? '').trim() !== ''
+        ? { destination_connected_port: String(data.destination_connected_port).trim() }
+        : {}),
     });
     if (!resp.success) throw new Error(resp.error || 'Failed to update label');
     onChanged();

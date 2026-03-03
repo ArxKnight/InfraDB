@@ -103,6 +103,11 @@ vi.mock('../lib/api', () => {
     updateSiteCableType: vi.fn(),
     deleteSiteCableType: vi.fn(),
 
+    // SIDs (used by label form endpoint options)
+    getSiteSids: vi.fn(),
+    getSiteSid: vi.fn(),
+    getSiteSidDeviceModels: vi.fn(),
+
     // Labels
     getLabels: vi.fn(),
     getLabel: vi.fn(),

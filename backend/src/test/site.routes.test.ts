@@ -960,7 +960,7 @@ describe('Site Routes', () => {
       expect(response.body.data.hops.length).toBeGreaterThanOrEqual(2);
 
       const hopHostnames = (response.body.data.hops as any[]).map((h) => String(h.hostname));
-      expect(hopHostnames).toContain('WAL-SW1');
+      expect(hopHostnames).toContain('Unknown');
       expect(hopHostnames).toContain('WAL-PP1');
     });
 
@@ -975,6 +975,318 @@ describe('Site Routes', () => {
         .get(`/api/sites/${site.id}/cables/9999/trace`)
         .set('Authorization', `Bearer ${authToken}`)
         .expect(404);
+    });
+
+    it('GET /api/sites/:id/cables/:cableRef/trace should keep endpoints unknown when no connected SID metadata is set', async () => {
+      const site = await siteModel.create({
+        name: 'Unknown Endpoint Trace Site',
+        code: 'UET',
+        created_by: testUser.id,
+      });
+
+      const sourceLocation = await siteLocationModel.create({
+        site_id: site.id,
+        template_type: 'DATACENTRE',
+        floor: '0',
+        suite: '1',
+        row: 'A',
+        rack: '1',
+        rack_size_u: 42,
+        label: 'WAL',
+      });
+
+      const destinationLocation = await siteLocationModel.create({
+        site_id: site.id,
+        template_type: 'DATACENTRE',
+        floor: '0',
+        suite: '1',
+        row: 'A',
+        rack: '2',
+        rack_size_u: 42,
+        label: 'WAL',
+      });
+
+      const cableType = await cableTypeModel.create({ site_id: site.id, name: 'CAT6' });
+
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, hostname, status, location_id, rack_u)
+         VALUES (?, ?, ?, ?, ?, ?)`
+        , [site.id, '11', 'PP-AUDIO1', 'Active', sourceLocation.id, '42']
+      );
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, hostname, status, location_id, rack_u)
+         VALUES (?, ?, ?, ?, ?, ?)`
+        , [site.id, '5', 'WAL-SW1', 'Active', destinationLocation.id, '23']
+      );
+
+      await labelModel.create({
+        site_id: site.id,
+        created_by: testUser.id,
+        source_location_id: sourceLocation.id,
+        destination_location_id: destinationLocation.id,
+        cable_type_id: cableType.id,
+      });
+
+      const response = await request(app)
+        .get(`/api/sites/${site.id}/cables/0001/trace`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.cableRef).toBe('#0001');
+
+      const hops = response.body.data.hops as any[];
+      expect(hops).toHaveLength(2);
+      expect(hops[0].hostname).toBe('Unknown');
+      expect(hops[0].sidId).toBeNull();
+      expect(hops[0].manufacturer).toBeNull();
+      expect(hops[0].modelName).toBeNull();
+      expect(String(hops[0].rackLocation ?? '')).toContain('WAL/FL0/S1/ROWA/R1');
+      expect(hops[0].portLabel).toBeNull();
+      expect(hops[1].hostname).toBe('Unknown');
+      expect(hops[1].sidId).toBeNull();
+      expect(hops[1].manufacturer).toBeNull();
+      expect(hops[1].modelName).toBeNull();
+      expect(String(hops[1].rackLocation ?? '')).toContain('WAL/FL0/S1/ROWA/R2');
+      expect(hops[1].portLabel).toBeNull();
+    });
+
+    it('GET /api/sites/:id/cables/:cableRef/trace should use connected endpoint SID and port metadata', async () => {
+      const site = await siteModel.create({
+        name: 'Connected Trace Site',
+        code: 'CTS',
+        created_by: testUser.id,
+      });
+
+      const sourceLocation = await siteLocationModel.create({
+        site_id: site.id,
+        template_type: 'DATACENTRE',
+        floor: '1',
+        suite: 'A',
+        row: 'R1',
+        rack: '01',
+        rack_size_u: 42,
+        label: 'WAL',
+      });
+
+      const destinationLocation = await siteLocationModel.create({
+        site_id: site.id,
+        template_type: 'DATACENTRE',
+        floor: '1',
+        suite: 'A',
+        row: 'R1',
+        rack: '02',
+        rack_size_u: 42,
+        label: 'WAL',
+      });
+
+      const cableType = await cableTypeModel.create({ site_id: site.id, name: 'CAT6A' });
+
+      await db.execute(
+        `INSERT INTO sid_device_models (site_id, manufacturer, name, is_switch, default_switch_port_count)
+         VALUES (?, ?, ?, ?, ?)`
+        , [site.id, 'Ubiquiti', 'USW-24', 1, 24]
+      );
+
+      const modelRows = await db.query(
+        'SELECT id FROM sid_device_models WHERE site_id = ? AND name = ? ORDER BY id DESC LIMIT 1',
+        [site.id, 'USW-24']
+      );
+      const switchModelId = Number((modelRows?.[0] as any)?.id);
+
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, hostname, status, location_id, rack_u, device_model_id, switch_port_count)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        , [site.id, '101', 'CTS-SW1', 'Active', sourceLocation.id, '30', switchModelId, 24]
+      );
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, hostname, status, location_id, rack_u, device_model_id, switch_port_count)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        , [site.id, '102', 'CTS-SW2', 'Active', destinationLocation.id, '29', switchModelId, 24]
+      );
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, hostname, status, location_id, rack_u, device_model_id, switch_port_count)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        , [site.id, '103', 'CTS-PP1', 'Active', sourceLocation.id, '28', switchModelId, 24]
+      );
+
+      const sidRows = await db.query(
+        'SELECT id, sid_number FROM sids WHERE site_id = ? AND sid_number IN (?, ?, ?) ORDER BY sid_number ASC',
+        [site.id, '101', '102', '103']
+      );
+      const sidByNumber = new Map<string, number>();
+      for (const row of sidRows as any[]) {
+        sidByNumber.set(String(row.sid_number), Number(row.id));
+      }
+
+      await labelModel.create({
+        site_id: site.id,
+        created_by: testUser.id,
+        source_location_id: sourceLocation.id,
+        destination_location_id: destinationLocation.id,
+        cable_type_id: cableType.id,
+        via_patch_panel: true,
+        patch_panel_sid_id: sidByNumber.get('103') ?? null,
+        patch_panel_port: 11,
+        source_connected_sid_id: sidByNumber.get('101') ?? null,
+        source_connected_port: '5',
+        destination_connected_sid_id: sidByNumber.get('102') ?? null,
+        destination_connected_port: '7',
+      });
+
+      const response = await request(app)
+        .get(`/api/sites/${site.id}/cables/0001/trace`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.cableRef).toBe('#0001');
+      expect(Array.isArray(response.body.data.hops)).toBe(true);
+      expect(response.body.data.hops.length).toBeGreaterThanOrEqual(2);
+
+      const hops = response.body.data.hops as any[];
+      const sourceHop = hops.find((h) => String(h.hostname) === 'CTS-SW1');
+      const destinationHop = hops.find((h) => String(h.hostname) === 'CTS-SW2');
+      const patchHop = hops.find((h) => String(h.hostname) === 'CTS-PP1');
+
+      expect(sourceHop).toBeTruthy();
+      expect(destinationHop).toBeTruthy();
+      expect(sourceHop.sidId).toBe(sidByNumber.get('101'));
+      expect(destinationHop.sidId).toBe(sidByNumber.get('102'));
+      expect(sourceHop.portLabel).toBe('Port 5');
+      expect(destinationHop.portLabel).toBe('Port 7');
+      expect(patchHop).toBeTruthy();
+      expect(patchHop.portLabel).toBe('Port 11');
+    });
+
+    it('GET /api/sites/:id/cables/:cableRef/trace should include source and destination patch panels in order', async () => {
+      const site = await siteModel.create({
+        name: 'Dual Patch Trace Site',
+        code: 'DPT',
+        created_by: testUser.id,
+      });
+
+      const sourceLocation = await siteLocationModel.create({
+        site_id: site.id,
+        template_type: 'DATACENTRE',
+        floor: '2',
+        suite: 'B',
+        row: 'R2',
+        rack: '01',
+        rack_size_u: 42,
+        label: 'DPT',
+      });
+
+      const destinationLocation = await siteLocationModel.create({
+        site_id: site.id,
+        template_type: 'DATACENTRE',
+        floor: '2',
+        suite: 'B',
+        row: 'R2',
+        rack: '02',
+        rack_size_u: 42,
+        label: 'DPT',
+      });
+
+      const cableType = await cableTypeModel.create({ site_id: site.id, name: 'OM4' });
+
+      await db.execute(
+        `INSERT INTO sid_device_models (site_id, manufacturer, name, is_patch_panel, default_patch_panel_port_count)
+         VALUES (?, ?, ?, ?, ?)`
+        , [site.id, 'Commscope', 'Panel24', 1, 24]
+      );
+      await db.execute(
+        `INSERT INTO sid_device_models (site_id, manufacturer, name, is_switch, default_switch_port_count)
+         VALUES (?, ?, ?, ?, ?)`
+        , [site.id, 'Cisco', 'Switch24', 1, 24]
+      );
+
+      const panelModelRows = await db.query(
+        'SELECT id FROM sid_device_models WHERE site_id = ? AND name = ? ORDER BY id DESC LIMIT 1',
+        [site.id, 'Panel24']
+      );
+      const switchModelRows = await db.query(
+        'SELECT id FROM sid_device_models WHERE site_id = ? AND name = ? ORDER BY id DESC LIMIT 1',
+        [site.id, 'Switch24']
+      );
+      const patchPanelModelId = Number((panelModelRows?.[0] as any)?.id);
+      const switchModelId = Number((switchModelRows?.[0] as any)?.id);
+
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, hostname, status, location_id, rack_u, device_model_id, switch_port_count)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        , [site.id, '201', 'DPT-SW1', 'Active', sourceLocation.id, '35', switchModelId, 24]
+      );
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, hostname, status, location_id, rack_u, device_model_id, switch_port_count)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        , [site.id, '202', 'DPT-SW2', 'Active', destinationLocation.id, '34', switchModelId, 24]
+      );
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, hostname, status, location_id, rack_u, device_model_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        , [site.id, '203', 'DPT-PP-SRC', 'Active', sourceLocation.id, '33', patchPanelModelId]
+      );
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, hostname, status, location_id, rack_u, device_model_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        , [site.id, '204', 'DPT-PP-DST', 'Active', destinationLocation.id, '32', patchPanelModelId]
+      );
+
+      const sidRows = await db.query(
+        'SELECT id, sid_number FROM sids WHERE site_id = ? AND sid_number IN (?, ?, ?, ?) ORDER BY sid_number ASC',
+        [site.id, '201', '202', '203', '204']
+      );
+      const sidByNumber = new Map<string, number>();
+      for (const row of sidRows as any[]) {
+        sidByNumber.set(String(row.sid_number), Number(row.id));
+      }
+
+      await labelModel.create({
+        site_id: site.id,
+        created_by: testUser.id,
+        source_location_id: sourceLocation.id,
+        destination_location_id: destinationLocation.id,
+        cable_type_id: cableType.id,
+        via_patch_panel: true,
+        source_patch_panel_sid_id: sidByNumber.get('203') ?? null,
+        source_patch_panel_port: 9,
+        destination_patch_panel_sid_id: sidByNumber.get('204') ?? null,
+        destination_patch_panel_port: 10,
+        source_connected_sid_id: sidByNumber.get('201') ?? null,
+        source_connected_port: '1',
+        destination_connected_sid_id: sidByNumber.get('202') ?? null,
+        destination_connected_port: '2',
+      });
+
+      const response = await request(app)
+        .get(`/api/sites/${site.id}/cables/0001/trace`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      const hops = response.body.data.hops as any[];
+      const hostnames = hops.map((h) => String(h.hostname));
+
+      expect(hostnames).toContain('DPT-SW1');
+      expect(hostnames).toContain('DPT-PP-SRC');
+      expect(hostnames).toContain('DPT-PP-DST');
+      expect(hostnames).toContain('DPT-SW2');
+
+      const sourceIndex = hostnames.indexOf('DPT-SW1');
+      const sourcePatchIndex = hostnames.indexOf('DPT-PP-SRC');
+      const destinationPatchIndex = hostnames.indexOf('DPT-PP-DST');
+      const destinationIndex = hostnames.indexOf('DPT-SW2');
+
+      expect(sourceIndex).toBeGreaterThanOrEqual(0);
+      expect(sourcePatchIndex).toBeGreaterThan(sourceIndex);
+      expect(destinationPatchIndex).toBeGreaterThan(sourcePatchIndex);
+      expect(destinationIndex).toBeGreaterThan(destinationPatchIndex);
+
+      const sourcePatchHop = hops[sourcePatchIndex];
+      const destinationPatchHop = hops[destinationPatchIndex];
+      expect(sourcePatchHop.portLabel).toBe('Port 9');
+      expect(destinationPatchHop.portLabel).toBe('Port 10');
     });
   });
 

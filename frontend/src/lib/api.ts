@@ -924,6 +924,10 @@ class ApiClient {
     via_patch_panel?: boolean;
     patch_panel_sid_id?: number;
     patch_panel_port?: number;
+    source_patch_panel_sid_id?: number;
+    source_patch_panel_port?: number;
+    destination_patch_panel_sid_id?: number;
+    destination_patch_panel_port?: number;
     source_connected_sid_id?: number | null;
     source_connected_hostname?: string | null;
     source_connected_port?: string | null;
@@ -949,6 +953,10 @@ class ApiClient {
       via_patch_panel?: boolean;
       patch_panel_sid_id?: number;
       patch_panel_port?: number;
+      source_patch_panel_sid_id?: number;
+      source_patch_panel_port?: number;
+      destination_patch_panel_sid_id?: number;
+      destination_patch_panel_port?: number;
       source_connected_sid_id?: number | null;
       source_connected_hostname?: string | null;
       source_connected_port?: string | null;

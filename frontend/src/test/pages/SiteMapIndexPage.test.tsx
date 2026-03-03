@@ -44,6 +44,7 @@ describe('SiteMapIndexPage', () => {
             rackSizeU: 42,
             occupants: [
               { uPosition: 22, sidId: 1, sidNumber: '1', hostname: 'WAL-SW1' },
+              { uPosition: 30, rackUnits: 2, sidId: 3, sidNumber: '3', hostname: 'WAL-Media1' },
               { uPosition: 1, sidId: 6, sidNumber: '6', hostname: 'WAL-PDU' },
             ],
           },
@@ -64,6 +65,7 @@ describe('SiteMapIndexPage', () => {
             modelName: 'USW-24-POE (95W)',
             rackLocation: 'WAL/FL0/S1/ROWA/R1',
             rackU: 22,
+            rackUText: '22',
             rackUnits: 1,
             portLabel: 'Port 3',
             nicType: 'RJ45',
@@ -75,8 +77,33 @@ describe('SiteMapIndexPage', () => {
             modelName: 'PowerCat',
             rackLocation: 'WAL/FL0/S1/ROWA/R1',
             rackU: 21,
+            rackUText: '21',
             rackUnits: 1,
             portLabel: 'Port 1',
+            nicType: null,
+          },
+          {
+            hostname: 'WAL-PP2',
+            sidId: 4,
+            manufacturer: 'Molex',
+            modelName: 'PowerCat',
+            rackLocation: 'WAL/FL0/S1/ROWA/R2',
+            rackU: 20,
+            rackUText: '20',
+            rackUnits: 1,
+            portLabel: 'Port 2',
+            nicType: null,
+          },
+          {
+            hostname: 'WAL-SW2',
+            sidId: 5,
+            manufacturer: 'Ubiquiti',
+            modelName: 'USW-24-POE (95W)',
+            rackLocation: 'WAL/FL0/S1/ROWA/R2',
+            rackU: 22,
+            rackUText: '22',
+            rackUnits: 1,
+            portLabel: 'Port 9',
             nicType: 'RJ45',
           },
         ],
@@ -88,12 +115,13 @@ describe('SiteMapIndexPage', () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /mapindex/i })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Test Site' })).toBeInTheDocument();
     });
 
+    expect(screen.getByText('MAPIndex')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Rack View' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Cable Trace' })).toBeInTheDocument();
-    expect(screen.getByText('Select rack locations to view rack elevations.')).toBeInTheDocument();
+    expect(screen.getByText('Select rack locations to view rack/s visually')).toBeInTheDocument();
   });
 
   it('loads selected rack elevations and shows occupants', async () => {
@@ -115,6 +143,7 @@ describe('SiteMapIndexPage', () => {
 
     expect(screen.getByText('Rack - WAL/FL0/S1/ROWA/R1')).toBeInTheDocument();
     expect(screen.getByText('WAL-SW1 (SID: 1)')).toBeInTheDocument();
+    expect(screen.getAllByText('WAL-Media1 (SID: 3)')).toHaveLength(1);
     expect(screen.getByText('WAL-PDU (SID: 6)')).toBeInTheDocument();
   });
 
@@ -137,5 +166,62 @@ describe('SiteMapIndexPage', () => {
     expect(screen.getByText('Cable Trace Ref #0001')).toBeInTheDocument();
     expect(screen.getByText(/WAL-SW1/)).toBeInTheDocument();
     expect(screen.getByText(/WAL-PP1/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Cable Ref#' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Source SID' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Destination SID' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Source Patch Panel SID' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Destination Patch Panel SID' })).toBeInTheDocument();
+  });
+
+  it('renders unknown placeholders when cable endpoints are not linked to SIDs', async () => {
+    const user = userEvent.setup();
+
+    (apiClient as any).getSiteCableTrace = vi.fn().mockResolvedValue({
+      success: true,
+      data: {
+        cableRef: '#0001',
+        labelId: 1,
+        hops: [
+          {
+            hostname: 'Unknown',
+            sidId: null,
+            manufacturer: null,
+            modelName: null,
+            rackLocation: 'WAL/FL0/S1/ROWA/R1',
+            rackU: null,
+            rackUText: null,
+            rackUnits: null,
+            portLabel: null,
+            nicType: null,
+          },
+          {
+            hostname: 'Unknown',
+            sidId: null,
+            manufacturer: null,
+            modelName: null,
+            rackLocation: 'WAL/FL0/S1/ROWA/R2',
+            rackU: null,
+            rackUText: null,
+            rackUnits: null,
+            portLabel: null,
+            nicType: null,
+          },
+        ],
+      },
+    });
+
+    renderPage();
+
+    await user.click(await screen.findByRole('tab', { name: 'Cable Trace' }));
+    await user.type(screen.getByPlaceholderText('e.g. #0001'), '#0001');
+    await user.click(screen.getByRole('button', { name: 'Trace' }));
+
+    await waitFor(() => {
+      expect((apiClient as any).getSiteCableTrace).toHaveBeenCalledWith(1, '#0001');
+    });
+
+    expect(screen.getAllByText('Unknown (SID: Unknown)')).toHaveLength(2);
+    expect(screen.getAllByText('Unknown - Unknown | (Unknown)')).toHaveLength(2);
+    expect(screen.getAllByText('Connected Port: Unknown')).toHaveLength(2);
   });
 });

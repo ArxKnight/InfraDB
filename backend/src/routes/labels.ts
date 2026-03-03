@@ -26,6 +26,10 @@ const createLabelSchema = z.object({
   via_patch_panel: z.boolean().optional(),
   patch_panel_sid_id: z.coerce.number().int().positive().optional(),
   patch_panel_port: z.coerce.number().int().positive().optional(),
+  source_patch_panel_sid_id: z.coerce.number().int().positive().optional(),
+  source_patch_panel_port: z.coerce.number().int().positive().optional(),
+  destination_patch_panel_sid_id: z.coerce.number().int().positive().optional(),
+  destination_patch_panel_port: z.coerce.number().int().positive().optional(),
   source_connected_sid_id: z.coerce.number().int().positive().optional(),
   source_connected_hostname: z.string().max(255).optional(),
   source_connected_port: z.string().max(255).optional(),
@@ -34,18 +38,27 @@ const createLabelSchema = z.object({
   destination_connected_port: z.string().max(255).optional(),
 }).superRefine((data, ctx) => {
   if (data.via_patch_panel) {
-    if (!Number.isFinite(Number(data.patch_panel_sid_id)) || Number(data.patch_panel_sid_id) <= 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['patch_panel_sid_id'],
-        message: 'Patch panel is required when enabled',
-      });
+    const sourceSid = Number(data.source_patch_panel_sid_id ?? data.patch_panel_sid_id ?? 0);
+    const sourcePort = Number(data.source_patch_panel_port ?? data.patch_panel_port ?? 0);
+    const destinationSid = Number(data.destination_patch_panel_sid_id ?? 0);
+    const destinationPort = Number(data.destination_patch_panel_port ?? 0);
+
+    const sourceHasSid = Number.isFinite(sourceSid) && sourceSid > 0;
+    const sourceHasPort = Number.isFinite(sourcePort) && sourcePort > 0;
+    const destinationHasSid = Number.isFinite(destinationSid) && destinationSid > 0;
+    const destinationHasPort = Number.isFinite(destinationPort) && destinationPort > 0;
+
+    if ((sourceHasSid && !sourceHasPort) || (!sourceHasSid && sourceHasPort)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['source_patch_panel_port'], message: 'Source patch panel SID and port must both be set' });
     }
-    if (!Number.isFinite(Number(data.patch_panel_port)) || Number(data.patch_panel_port) <= 0) {
+    if ((destinationHasSid && !destinationHasPort) || (!destinationHasSid && destinationHasPort)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['destination_patch_panel_port'], message: 'Destination patch panel SID and port must both be set' });
+    }
+    if (!sourceHasSid && !destinationHasSid) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['patch_panel_port'],
-        message: 'Patch panel port is required when enabled',
+        path: ['source_patch_panel_sid_id'],
+        message: 'At least one patch panel is required when enabled',
       });
     }
   }
@@ -94,6 +107,10 @@ const updateLabelSchema = z.object({
   via_patch_panel: z.boolean().optional(),
   patch_panel_sid_id: z.coerce.number().int().positive().optional(),
   patch_panel_port: z.coerce.number().int().positive().optional(),
+  source_patch_panel_sid_id: z.coerce.number().int().positive().optional().nullable(),
+  source_patch_panel_port: z.coerce.number().int().positive().optional().nullable(),
+  destination_patch_panel_sid_id: z.coerce.number().int().positive().optional().nullable(),
+  destination_patch_panel_port: z.coerce.number().int().positive().optional().nullable(),
   source_connected_sid_id: z.coerce.number().int().positive().optional().nullable(),
   source_connected_hostname: z.string().max(255).optional().nullable(),
   source_connected_port: z.string().max(255).optional().nullable(),
@@ -221,37 +238,13 @@ async function normalizeConnectedEndpointSelection(input: {
   };
 }
 
-async function normalizePatchPanelSelection(
-  siteId: number,
-  data: {
-    via_patch_panel?: boolean;
-    patch_panel_sid_id?: number | null;
-    patch_panel_port?: number | null;
-  }
-): Promise<{
-  via_patch_panel: boolean;
-  patch_panel_sid_id: number | null;
-  patch_panel_port: number | null;
-}> {
-  const viaPatchPanel = data.via_patch_panel === true;
-  if (!viaPatchPanel) {
-    return {
-      via_patch_panel: false,
-      patch_panel_sid_id: null,
-      patch_panel_port: null,
-    };
-  }
-
-  const patchPanelSidId = Number(data.patch_panel_sid_id ?? 0);
-  const patchPanelPort = Number(data.patch_panel_port ?? 0);
-
-  if (!Number.isFinite(patchPanelSidId) || patchPanelSidId < 1) {
-    throw new Error('Patch panel is required when enabled');
-  }
-  if (!Number.isFinite(patchPanelPort) || patchPanelPort < 1) {
-    throw new Error('Patch panel port is required when enabled');
-  }
-
+async function normalizePatchPanelEndpointSelection(input: {
+  siteId: number;
+  sideLabel: 'Source' | 'Destination';
+  sidId: number;
+  port: number;
+}): Promise<{ sid_id: number; port: number }> {
+  const { siteId, sideLabel, sidId, port } = input;
   const adapter = connection.getAdapter();
   const rows = await adapter.query(
     `SELECT
@@ -263,16 +256,16 @@ async function normalizePatchPanelSelection(
      LEFT JOIN sid_device_models dm ON dm.id = s.device_model_id
      WHERE s.id = ? AND s.site_id = ?
      LIMIT 1`,
-    [patchPanelSidId, siteId]
+    [sidId, siteId]
   );
   const row = (rows?.[0] as any) ?? null;
   if (!row) {
-    throw new Error('Selected patch panel SID is invalid for this site');
+    throw new Error(`Selected ${sideLabel.toLowerCase()} patch panel SID is invalid for this site`);
   }
 
   const isPatchPanel = Number(row?.is_patch_panel ?? 0) === 1 || row?.is_patch_panel === true;
   if (!isPatchPanel) {
-    throw new Error('Selected SID is not a patch panel');
+    throw new Error(`Selected ${sideLabel.toLowerCase()} SID is not a patch panel`);
   }
 
   const switchPortCount = Number(row?.switch_port_count ?? 0);
@@ -283,14 +276,95 @@ async function normalizePatchPanelSelection(
       ? Math.floor(defaultPatchPanelPortCount)
       : null);
 
-  if (maxPorts !== null && patchPanelPort > maxPorts) {
-    throw new Error(`Patch panel port must be between 1 and ${maxPorts}`);
+  if (maxPorts !== null && port > maxPorts) {
+    throw new Error(`${sideLabel} patch panel port must be between 1 and ${maxPorts}`);
   }
 
   return {
+    sid_id: sidId,
+    port: Math.floor(port),
+  };
+}
+
+async function normalizePatchPanelSelection(
+  siteId: number,
+  data: {
+    via_patch_panel?: boolean;
+    patch_panel_sid_id?: number | null;
+    patch_panel_port?: number | null;
+    source_patch_panel_sid_id?: number | null;
+    source_patch_panel_port?: number | null;
+    destination_patch_panel_sid_id?: number | null;
+    destination_patch_panel_port?: number | null;
+  }
+): Promise<{
+  via_patch_panel: boolean;
+  patch_panel_sid_id: number | null;
+  patch_panel_port: number | null;
+  source_patch_panel_sid_id: number | null;
+  source_patch_panel_port: number | null;
+  destination_patch_panel_sid_id: number | null;
+  destination_patch_panel_port: number | null;
+}> {
+  const viaPatchPanel = data.via_patch_panel === true;
+  if (!viaPatchPanel) {
+    return {
+      via_patch_panel: false,
+      patch_panel_sid_id: null,
+      patch_panel_port: null,
+      source_patch_panel_sid_id: null,
+      source_patch_panel_port: null,
+      destination_patch_panel_sid_id: null,
+      destination_patch_panel_port: null,
+    };
+  }
+
+  const sourcePatchPanelSidId = Number(data.source_patch_panel_sid_id ?? data.patch_panel_sid_id ?? 0);
+  const sourcePatchPanelPort = Number(data.source_patch_panel_port ?? data.patch_panel_port ?? 0);
+  const destinationPatchPanelSidId = Number(data.destination_patch_panel_sid_id ?? 0);
+  const destinationPatchPanelPort = Number(data.destination_patch_panel_port ?? 0);
+
+  const sourceHasSid = Number.isFinite(sourcePatchPanelSidId) && sourcePatchPanelSidId > 0;
+  const sourceHasPort = Number.isFinite(sourcePatchPanelPort) && sourcePatchPanelPort > 0;
+  const destinationHasSid = Number.isFinite(destinationPatchPanelSidId) && destinationPatchPanelSidId > 0;
+  const destinationHasPort = Number.isFinite(destinationPatchPanelPort) && destinationPatchPanelPort > 0;
+
+  if ((sourceHasSid && !sourceHasPort) || (!sourceHasSid && sourceHasPort)) {
+    throw new Error('Source patch panel SID and port must both be set');
+  }
+  if ((destinationHasSid && !destinationHasPort) || (!destinationHasSid && destinationHasPort)) {
+    throw new Error('Destination patch panel SID and port must both be set');
+  }
+  if (!sourceHasSid && !destinationHasSid) {
+    throw new Error('At least one patch panel is required when enabled');
+  }
+
+  const normalizedSource = sourceHasSid
+    ? await normalizePatchPanelEndpointSelection({
+        siteId,
+        sideLabel: 'Source',
+        sidId: sourcePatchPanelSidId,
+        port: sourcePatchPanelPort,
+      })
+    : null;
+
+  const normalizedDestination = destinationHasSid
+    ? await normalizePatchPanelEndpointSelection({
+        siteId,
+        sideLabel: 'Destination',
+        sidId: destinationPatchPanelSidId,
+        port: destinationPatchPanelPort,
+      })
+    : null;
+
+  return {
     via_patch_panel: true,
-    patch_panel_sid_id: patchPanelSidId,
-    patch_panel_port: Math.floor(patchPanelPort),
+    patch_panel_sid_id: normalizedSource?.sid_id ?? null,
+    patch_panel_port: normalizedSource?.port ?? null,
+    source_patch_panel_sid_id: normalizedSource?.sid_id ?? null,
+    source_patch_panel_port: normalizedSource?.port ?? null,
+    destination_patch_panel_sid_id: normalizedDestination?.sid_id ?? null,
+    destination_patch_panel_port: normalizedDestination?.port ?? null,
   };
 }
 
@@ -616,6 +690,10 @@ router.post('/', authenticateToken, resolveSiteAccess(req => Number(req.body.sit
       ...(labelDataParsed.via_patch_panel !== undefined ? { via_patch_panel: labelDataParsed.via_patch_panel } : {}),
       ...(labelDataParsed.patch_panel_sid_id !== undefined ? { patch_panel_sid_id: labelDataParsed.patch_panel_sid_id } : {}),
       ...(labelDataParsed.patch_panel_port !== undefined ? { patch_panel_port: labelDataParsed.patch_panel_port } : {}),
+      ...(labelDataParsed.source_patch_panel_sid_id !== undefined ? { source_patch_panel_sid_id: labelDataParsed.source_patch_panel_sid_id } : {}),
+      ...(labelDataParsed.source_patch_panel_port !== undefined ? { source_patch_panel_port: labelDataParsed.source_patch_panel_port } : {}),
+      ...(labelDataParsed.destination_patch_panel_sid_id !== undefined ? { destination_patch_panel_sid_id: labelDataParsed.destination_patch_panel_sid_id } : {}),
+      ...(labelDataParsed.destination_patch_panel_port !== undefined ? { destination_patch_panel_port: labelDataParsed.destination_patch_panel_port } : {}),
     });
     const sourceConnected = await normalizeConnectedEndpointSelection({
       site_id: labelDataParsed.site_id,
@@ -747,9 +825,18 @@ router.post('/', authenticateToken, resolveSiteAccess(req => Number(req.body.sit
       if (
         error.message === 'Patch panel is required when enabled' ||
         error.message === 'Patch panel port is required when enabled' ||
+        error.message === 'At least one patch panel is required when enabled' ||
+        error.message === 'Source patch panel SID and port must both be set' ||
+        error.message === 'Destination patch panel SID and port must both be set' ||
         error.message === 'Selected patch panel SID is invalid for this site' ||
         error.message === 'Selected SID is not a patch panel' ||
+        error.message === 'Selected source patch panel SID is invalid for this site' ||
+        error.message === 'Selected destination patch panel SID is invalid for this site' ||
+        error.message === 'Selected source SID is not a patch panel' ||
+        error.message === 'Selected destination SID is not a patch panel' ||
         error.message.startsWith('Patch panel port must be between 1 and ') ||
+        error.message.startsWith('Source patch panel port must be between 1 and ') ||
+        error.message.startsWith('Destination patch panel port must be between 1 and ') ||
         error.message === 'Source connected hostname is no longer supported. Select a SID and port instead' ||
         error.message === 'Destination connected hostname is no longer supported. Select a SID and port instead' ||
         error.message === 'Source connected port is required when source SID is set' ||
@@ -809,12 +896,23 @@ router.put('/:id', authenticateToken, resolveSiteAccess(req => Number(req.body.s
     const hasPatchPanelInput =
       labelDataParsed.via_patch_panel !== undefined ||
       labelDataParsed.patch_panel_sid_id !== undefined ||
-      labelDataParsed.patch_panel_port !== undefined;
+      labelDataParsed.patch_panel_port !== undefined ||
+      labelDataParsed.source_patch_panel_sid_id !== undefined ||
+      labelDataParsed.source_patch_panel_port !== undefined ||
+      labelDataParsed.destination_patch_panel_sid_id !== undefined ||
+      labelDataParsed.destination_patch_panel_port !== undefined;
 
     const desiredViaPatchPanel =
       labelDataParsed.via_patch_panel !== undefined
         ? labelDataParsed.via_patch_panel
-        : (labelDataParsed.patch_panel_sid_id !== undefined || labelDataParsed.patch_panel_port !== undefined)
+        : (
+            labelDataParsed.patch_panel_sid_id !== undefined ||
+            labelDataParsed.patch_panel_port !== undefined ||
+            labelDataParsed.source_patch_panel_sid_id !== undefined ||
+            labelDataParsed.source_patch_panel_port !== undefined ||
+            labelDataParsed.destination_patch_panel_sid_id !== undefined ||
+            labelDataParsed.destination_patch_panel_port !== undefined
+          )
           ? true
           : Boolean(existing.via_patch_panel);
 
@@ -829,6 +927,22 @@ router.put('/:id', authenticateToken, resolveSiteAccess(req => Number(req.body.s
             labelDataParsed.patch_panel_port !== undefined
               ? labelDataParsed.patch_panel_port
               : (existing.patch_panel_port ?? null),
+          source_patch_panel_sid_id:
+            labelDataParsed.source_patch_panel_sid_id !== undefined
+              ? labelDataParsed.source_patch_panel_sid_id
+              : ((existing as any).source_patch_panel_sid_id ?? existing.patch_panel_sid_id ?? null),
+          source_patch_panel_port:
+            labelDataParsed.source_patch_panel_port !== undefined
+              ? labelDataParsed.source_patch_panel_port
+              : ((existing as any).source_patch_panel_port ?? existing.patch_panel_port ?? null),
+          destination_patch_panel_sid_id:
+            labelDataParsed.destination_patch_panel_sid_id !== undefined
+              ? labelDataParsed.destination_patch_panel_sid_id
+              : ((existing as any).destination_patch_panel_sid_id ?? null),
+          destination_patch_panel_port:
+            labelDataParsed.destination_patch_panel_port !== undefined
+              ? labelDataParsed.destination_patch_panel_port
+              : ((existing as any).destination_patch_panel_port ?? null),
         })
       : null;
 
@@ -950,9 +1064,18 @@ router.put('/:id', authenticateToken, resolveSiteAccess(req => Number(req.body.s
       if (
         error.message === 'Patch panel is required when enabled' ||
         error.message === 'Patch panel port is required when enabled' ||
+        error.message === 'At least one patch panel is required when enabled' ||
+        error.message === 'Source patch panel SID and port must both be set' ||
+        error.message === 'Destination patch panel SID and port must both be set' ||
         error.message === 'Selected patch panel SID is invalid for this site' ||
         error.message === 'Selected SID is not a patch panel' ||
+        error.message === 'Selected source patch panel SID is invalid for this site' ||
+        error.message === 'Selected destination patch panel SID is invalid for this site' ||
+        error.message === 'Selected source SID is not a patch panel' ||
+        error.message === 'Selected destination SID is not a patch panel' ||
         error.message.startsWith('Patch panel port must be between 1 and ') ||
+        error.message.startsWith('Source patch panel port must be between 1 and ') ||
+        error.message.startsWith('Destination patch panel port must be between 1 and ') ||
         error.message === 'Source connected hostname is no longer supported. Select a SID and port instead' ||
         error.message === 'Destination connected hostname is no longer supported. Select a SID and port instead' ||
         error.message === 'Source connected port is required when source SID is set' ||

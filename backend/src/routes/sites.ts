@@ -465,6 +465,7 @@ function mapSidRowToTraceHop(
   const sidId = Number(sidRow.sid_id ?? sidRow.id ?? 0);
   if (!Number.isFinite(sidId) || sidId < 1) return null;
   const rackU = parseRackUPosition(sidRow.rack_u);
+  const rackUText = normalizeRackU(sidRow.rack_u);
   return {
     hostname: String(sidRow.hostname ?? '').trim() || `SID-${sidId}`,
     sidId,
@@ -472,6 +473,7 @@ function mapSidRowToTraceHop(
     modelName: String(sidRow.model_name ?? '').trim() || null,
     rackLocation: formatRackLocationPath(sidRow),
     rackU,
+    rackUText,
     rackUnits: rackU,
     portLabel:
       overrides?.portLabel ??
@@ -5249,9 +5251,14 @@ router.get(
       }
 
       const viaPatchPanel = payload?.via_patch_panel === true;
-      const patchPanelSidId = Number(payload?.patch_panel_sid_id ?? 0);
-      const patchPanelPortRaw = Number(payload?.patch_panel_port ?? 0);
-      const patchPanelPort = Number.isFinite(patchPanelPortRaw) && patchPanelPortRaw > 0 ? String(Math.trunc(patchPanelPortRaw)) : '';
+      const sourcePatchPanelSidIdRaw = Number(payload?.source_patch_panel_sid_id ?? payload?.patch_panel_sid_id ?? 0);
+      const sourcePatchPanelSidId = Number.isFinite(sourcePatchPanelSidIdRaw) && sourcePatchPanelSidIdRaw > 0 ? Math.trunc(sourcePatchPanelSidIdRaw) : 0;
+      const sourcePatchPanelPortRaw = Number(payload?.source_patch_panel_port ?? payload?.patch_panel_port ?? 0);
+      const sourcePatchPanelPort = Number.isFinite(sourcePatchPanelPortRaw) && sourcePatchPanelPortRaw > 0 ? String(Math.trunc(sourcePatchPanelPortRaw)) : '';
+      const destinationPatchPanelSidIdRaw = Number(payload?.destination_patch_panel_sid_id ?? 0);
+      const destinationPatchPanelSidId = Number.isFinite(destinationPatchPanelSidIdRaw) && destinationPatchPanelSidIdRaw > 0 ? Math.trunc(destinationPatchPanelSidIdRaw) : 0;
+      const destinationPatchPanelPortRaw = Number(payload?.destination_patch_panel_port ?? 0);
+      const destinationPatchPanelPort = Number.isFinite(destinationPatchPanelPortRaw) && destinationPatchPanelPortRaw > 0 ? String(Math.trunc(destinationPatchPanelPortRaw)) : '';
 
       const sourceConnectedSidIdRaw = Number(payload?.source_connected_sid_id ?? 0);
       const sourceConnectedSidId = Number.isFinite(sourceConnectedSidIdRaw) && sourceConnectedSidIdRaw > 0 ? Math.trunc(sourceConnectedSidIdRaw) : 0;
@@ -5268,29 +5275,18 @@ router.get(
 
       const sourceSid = sourceConnectedSidId > 0
         ? await fetchSidHopById({ adapter, siteId, sidId: sourceConnectedSidId })
-        : sourceLocationId > 0
-          ? await fetchLocationPreferredSid({
-              adapter,
-              siteId,
-              locationId: sourceLocationId,
-              ...(viaPatchPanel && patchPanelSidId > 0 && patchPanelPort !== ''
-                ? { preferredSwitchSidId: patchPanelSidId, preferredSwitchPort: patchPanelPort }
-                : {}),
-            })
-          : null;
+        : null;
 
       const destinationSid = destinationConnectedSidId > 0
         ? await fetchSidHopById({ adapter, siteId, sidId: destinationConnectedSidId })
-        : destinationLocationId > 0
-          ? await fetchLocationPreferredSid({
-              adapter,
-              siteId,
-              locationId: destinationLocationId,
-            })
-          : null;
+        : null;
 
-      const patchPanelSid = viaPatchPanel && patchPanelSidId > 0
-        ? await fetchSidHopById({ adapter, siteId, sidId: patchPanelSidId })
+      const sourcePatchPanelSid = viaPatchPanel && sourcePatchPanelSidId > 0
+        ? await fetchSidHopById({ adapter, siteId, sidId: sourcePatchPanelSidId })
+        : null;
+
+      const destinationPatchPanelSid = viaPatchPanel && destinationPatchPanelSidId > 0
+        ? await fetchSidHopById({ adapter, siteId, sidId: destinationPatchPanelSidId })
         : null;
 
       const hops: any[] = [];
@@ -5324,12 +5320,13 @@ router.get(
         }
 
         return {
-          hostname: hostname || 'Unknown endpoint',
+          hostname: hostname || 'Unknown',
           sidId: null,
           manufacturer: null,
           modelName: null,
           rackLocation: locationText,
           rackU: null,
+          rackUText: null,
           rackUnits: null,
           portLabel: connectedPort !== '' ? `Port ${connectedPort}` : null,
           nicType: null,
@@ -5373,24 +5370,35 @@ router.get(
         );
         const srcLoc = (locationRows?.[0] as any) ?? null;
         hops.push({
-          hostname: 'Unknown endpoint',
+          hostname: 'Unknown',
           sidId: null,
           manufacturer: null,
           modelName: null,
           rackLocation: srcLoc ? formatRackLocationPath(srcLoc) : null,
           rackU: null,
+          rackUText: null,
           rackUnits: null,
           portLabel: null,
           nicType: null,
         });
       }
 
-      if (patchPanelSid) {
-        const patchHop = mapSidRowToTraceHop(patchPanelSid, {
-          portLabel: patchPanelPort !== '' ? `Port ${patchPanelPort}` : null,
+      if (sourcePatchPanelSid) {
+        const patchHop = mapSidRowToTraceHop(sourcePatchPanelSid, {
+          portLabel: sourcePatchPanelPort !== '' ? `Port ${sourcePatchPanelPort}` : null,
           nicType: null,
         });
-        if (patchHop && !hops.some((h) => h && h.sidId === patchHop.sidId)) {
+        if (patchHop) {
+          hops.push(patchHop);
+        }
+      }
+
+      if (destinationPatchPanelSid) {
+        const patchHop = mapSidRowToTraceHop(destinationPatchPanelSid, {
+          portLabel: destinationPatchPanelPort !== '' ? `Port ${destinationPatchPanelPort}` : null,
+          nicType: null,
+        });
+        if (patchHop) {
           hops.push(patchHop);
         }
       }
@@ -5433,12 +5441,13 @@ router.get(
         );
         const dstLoc = (locationRows?.[0] as any) ?? null;
         hops.push({
-          hostname: 'Unknown endpoint',
+          hostname: 'Unknown',
           sidId: null,
           manufacturer: null,
           modelName: null,
           rackLocation: dstLoc ? formatRackLocationPath(dstLoc) : null,
           rackU: null,
+          rackUText: null,
           rackUnits: null,
           portLabel: null,
           nicType: null,

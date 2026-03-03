@@ -74,6 +74,10 @@ export interface Label {
   via_patch_panel?: boolean;
   patch_panel_sid_id?: number | null;
   patch_panel_port?: number | null;
+  source_patch_panel_sid_id?: number | null;
+  source_patch_panel_port?: number | null;
+  destination_patch_panel_sid_id?: number | null;
+  destination_patch_panel_port?: number | null;
   source_connected_sid_id?: number | null;
   source_connected_hostname?: string | null;
   source_connected_port?: string | null;

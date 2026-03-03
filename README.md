@@ -16,9 +16,17 @@ It combines cable labeling, SID lifecycle management, location-aware inventory s
 ### Core
 - Multi-site management with per-user site memberships
 - Structured locations (`DATACENTRE` and `DOMESTIC` templates)
+- Location records support rack size (`Rack Size (U)`) and admin location tables display it
+- DOCX cable report export
+
+### Cable Platform
 - Cable label lifecycle with per-site sequential references
 - Cable type management per site
-- DOCX cable report export
+- Label create/edit form supports optional connected endpoints behind a toggle and validates endpoint fields only when enabled
+
+### MAP Platform
+- MAPIndex rack visualisations align racks from `U1` for mixed rack-size side-by-side comparison
+- MAPIndex cable trace uses explicit actions (`Open Source SID`, `Open Destination SID`, optional patch panel SID buttons, and `Open Cable Ref#` deep-link)
 
 ### SID Platform
 - SID Index with search by status/SID/location/hostname/model
@@ -415,6 +423,18 @@ npm run test
 
 Backend tests require a reachable MySQL test setup.
 If MySQL is unavailable, errors such as `ECONNREFUSED 127.0.0.1:3306` are expected.
+
+Windows helper script for containerized MySQL test runs:
+```powershell
+./backend/scripts/test-mysql.ps1
+```
+
+Manual containerized test DB workflow:
+```bash
+docker compose -f docker-compose.test.yml up -d mysql_test
+```
+
+The test container exposes MySQL on `127.0.0.1:3307` (`infradb_test` / `infradb`).
 
 ---
 

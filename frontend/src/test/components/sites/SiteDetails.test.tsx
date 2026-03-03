@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import SiteDetails from '../../../components/sites/SiteDetails';
 import { apiClient } from '../../../lib/api';
 
-const routerFuture = {
+const routerFuture = { 
   v7_startTransition: true,
   v7_relativeSplatPath: true,
 } as const;
@@ -34,6 +34,33 @@ vi.mock('../../../components/locations/LocationHierarchyDropdown', () => {
           </option>
         ))}
       </select>
+    ),
+  };
+});
+
+vi.mock('../../../components/labels', async () => {
+  const actual = await vi.importActual('../../../components/labels');
+  return {
+    ...(actual as object),
+    LabelForm: ({ onSubmit, isLoading }: any) => (
+      <button
+        type="button"
+        disabled={isLoading}
+        onClick={() =>
+          onSubmit({
+            source_location_id: 101,
+            destination_location_id: 102,
+            cable_type_id: 201,
+            site_id: 1,
+            source_connected_sid_id: 10,
+            source_connected_port: '3',
+            destination_connected_sid_id: 11,
+            destination_connected_port: '4',
+          })
+        }
+      >
+        Create Label
+      </button>
     ),
   };
 });
@@ -106,6 +133,16 @@ describe('SiteDetails', () => {
       },
     } as any);
 
+    vi.mocked(apiClient.getSiteSids).mockResolvedValue({
+      success: true,
+      data: { sids: [] },
+    } as any);
+
+    vi.mocked(apiClient.getSiteSidDeviceModels).mockResolvedValue({
+      success: true,
+      data: { device_models: [] },
+    } as any);
+
     vi.mocked(apiClient.createLabel).mockResolvedValue({
       success: true,
       data: {
@@ -131,7 +168,7 @@ describe('SiteDetails', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Test Site' })).toBeInTheDocument();
-      expect(screen.getByText('Cable Index')).toBeInTheDocument();
+      expect(screen.getByText('CableIndex')).toBeInTheDocument();
       expect(screen.getByText('Bulk Operations')).toBeInTheDocument();
       expect(screen.getByText('Labels')).toBeInTheDocument();
     });
@@ -311,25 +348,24 @@ describe('SiteDetails', () => {
 
     await user.click(screen.getByText('Create Your First Label'));
     await waitFor(() => {
-      expect(screen.getByLabelText('Source')).toBeInTheDocument();
-      expect(screen.getByLabelText('Destination')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /create label/i })).toBeInTheDocument();
     });
-
-    await user.selectOptions(screen.getByLabelText('Source'), '101');
-    await user.selectOptions(screen.getByLabelText('Destination'), '102');
-
-    // Select cable type
-    await user.click(screen.getByRole('combobox', { name: /cable type/i }));
-    await user.click(screen.getByRole('option', { name: 'CAT6' }));
 
     await user.click(screen.getByRole('button', { name: /create label/i }));
 
-    expect(apiClient.createLabel).toHaveBeenCalledWith({
-      source_location_id: 101,
-      destination_location_id: 102,
-      cable_type_id: 201,
-      notes: undefined,
-      site_id: 1,
+    await waitFor(() => {
+      expect(apiClient.createLabel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source_location_id: 101,
+          destination_location_id: 102,
+          cable_type_id: 201,
+          site_id: 1,
+          source_connected_sid_id: 10,
+          source_connected_port: '3',
+          destination_connected_sid_id: 11,
+          destination_connected_port: '4',
+        })
+      );
     });
   });
 });

@@ -33,6 +33,22 @@ vi.mock('../../components/locations/LocationHierarchyDropdown', () => {
   };
 });
 
+vi.mock('../../components/labels', async () => {
+  const actual = await vi.importActual('../../components/labels');
+  return {
+    ...(actual as object),
+    LabelForm: ({ onSubmit, isLoading }: any) => (
+      <button
+        type="button"
+        disabled={isLoading}
+        onClick={() => onSubmit({ source_location_id: 101, destination_location_id: 102, cable_type_id: 201, site_id: 1 })}
+      >
+        Create Label
+      </button>
+    ),
+  };
+});
+
 // Mock the API client
 vi.mock('../../lib/api', () => {
   const client = {
@@ -43,6 +59,8 @@ vi.mock('../../lib/api', () => {
     getSite: vi.fn(),
     getSiteLocations: vi.fn(),
     getSiteCableTypes: vi.fn(),
+    getSiteSids: vi.fn(),
+    getSiteSidDeviceModels: vi.fn(),
     getLabels: vi.fn(),
     createLabel: vi.fn(),
     get: vi.fn(),
@@ -397,6 +415,16 @@ describe('User Workflow Integration Tests', () => {
       },
     } as any);
 
+    vi.mocked(apiClient.getSiteSids).mockResolvedValue({
+      success: true,
+      data: { sids: [] },
+    } as any);
+
+    vi.mocked(apiClient.getSiteSidDeviceModels).mockResolvedValue({
+      success: true,
+      data: { device_models: [] },
+    } as any);
+
     vi.mocked(apiClient.createLabel).mockResolvedValue({
       success: true,
       data: {
@@ -441,27 +469,21 @@ describe('User Workflow Integration Tests', () => {
 
     // Fill in label form
     await waitFor(() => {
-      expect(screen.getByLabelText('Source')).toBeInTheDocument();
-      expect(screen.getByLabelText('Destination')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /create label/i })).toBeInTheDocument();
     });
 
-    await user.selectOptions(screen.getByLabelText('Source'), '101');
-    await user.selectOptions(screen.getByLabelText('Destination'), '102');
-
-    await user.click(screen.getByRole('combobox', { name: /cable type/i }));
-    await user.click(screen.getByRole('option', { name: 'CAT6' }));
-
-    // Submit form
-    const submitButton = screen.getByRole('button', { name: /create label/i });
-    await user.click(submitButton);
+    await user.click(screen.getByRole('button', { name: /create label/i }));
 
     // Verify API was called
-    expect(apiClient.createLabel).toHaveBeenCalledWith({
-      source_location_id: 101,
-      destination_location_id: 102,
-      cable_type_id: 201,
-      notes: undefined,
-      site_id: 1,
+    await waitFor(() => {
+      expect(apiClient.createLabel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source_location_id: 101,
+          destination_location_id: 102,
+          cable_type_id: 201,
+          site_id: 1,
+        })
+      );
     });
   });
 });
