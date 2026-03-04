@@ -226,6 +226,31 @@ describe('Site Routes', () => {
   });
 
   describe('GET /api/sites/:id/sids', () => {
+    it('returns SIDs in natural numeric sid_number order', async () => {
+      const site = await siteModel.create({ name: 'SID Sort Site', code: 'SSS', created_by: testUser.id });
+
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, status, hostname)
+         VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)`
+        , [
+          site.id, '1', 'Active', 'host-1',
+          site.id, '10', 'Active', 'host-10',
+          site.id, '2', 'Active', 'host-2',
+          site.id, '11', 'Active', 'host-11',
+        ]
+      );
+
+      const response = await request(app)
+        .get(`/api/sites/${site.id}/sids?search_field=sid&limit=200`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+
+      const sidNumbers = (response.body.data.sids ?? []).map((s: any) => String(s.sid_number));
+      expect(sidNumbers).toEqual(['1', '2', '10', '11']);
+    });
+
     it('returns primary switch hostname from On-Board NIC1 via sid_connections', async () => {
       const site = await siteModel.create({ name: 'SID Site', code: 'SS', created_by: testUser.id });
 
@@ -1382,6 +1407,144 @@ describe('Site Routes', () => {
         .get(`/api/sites/${site.id}/cable-report`)
         .set('Authorization', `Bearer ${authToken}`)
         .expect(403);
+    });
+  });
+
+  describe('GET /api/sites/:id/sid-index-report', () => {
+    it('should download a DOCX SID index report for a site member', async () => {
+      const site = await siteModel.create({
+        name: 'SID Report Site',
+        code: 'SRS',
+        created_by: testUser.id,
+      });
+
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, hostname, status, primary_ip)
+         VALUES (?, ?, ?, ?, ?)`,
+        [site.id, '1', 'SRS-SW1', 'Active', '10.0.0.1']
+      );
+
+      const response = await request(app)
+        .get(`/api/sites/${site.id}/sid-index-report`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .buffer(true)
+        .parse(parseBinaryResponse)
+        .expect(200);
+
+      expect(response.headers['content-type']).toContain(
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      );
+      expect(response.headers['content-disposition']).toMatch(/filename="SRS_sid_index_report_\d{8}_\d{6}\.docx"/);
+
+      const zip = new AdmZip(response.body);
+      const documentXml = zip.readAsText('word/document.xml');
+      expect(documentXml).toContain('InfraDB – SID Index Report');
+      expect(documentXml).toContain('SRS-SW1');
+      expect(documentXml).toContain('10.0.0.1');
+    });
+  });
+
+  describe('GET /api/sites/:id/cable-trace-report', () => {
+    it('should download a DOCX cable trace report for one or more cable refs', async () => {
+      const site = await siteModel.create({
+        name: 'Trace Report Site',
+        code: 'TRS',
+        created_by: testUser.id,
+      });
+
+      const sourceLocation = await siteLocationModel.create({
+        site_id: site.id,
+        template_type: 'DATACENTRE',
+        floor: '0',
+        suite: '1',
+        row: 'A',
+        rack: '1',
+        rack_size_u: 42,
+        label: 'TRS',
+      });
+      const destinationLocation = await siteLocationModel.create({
+        site_id: site.id,
+        template_type: 'DATACENTRE',
+        floor: '0',
+        suite: '1',
+        row: 'A',
+        rack: '2',
+        rack_size_u: 42,
+        label: 'TRS',
+      });
+      const cableType = await cableTypeModel.create({ site_id: site.id, name: 'CAT6' });
+
+      await labelModel.create({
+        site_id: site.id,
+        created_by: testUser.id,
+        source_location_id: sourceLocation.id,
+        destination_location_id: destinationLocation.id,
+        cable_type_id: cableType.id,
+        notes: 'Trace report test',
+      });
+
+      const response = await request(app)
+        .get(`/api/sites/${site.id}/cable-trace-report?refs=%230001,%239999`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .buffer(true)
+        .parse(parseBinaryResponse)
+        .expect(200);
+
+      expect(response.headers['content-type']).toContain(
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      );
+      expect(response.headers['content-disposition']).toMatch(/filename="TRS_cable_trace_report_\d{8}_\d{6}\.docx"/);
+
+      const zip = new AdmZip(response.body);
+      const documentXml = zip.readAsText('word/document.xml');
+      expect(documentXml).toContain('InfraDB – Cable Trace Report');
+      expect(documentXml).toContain('Cable Ref #0001');
+      expect(documentXml).toContain('#9999');
+    });
+  });
+
+  describe('GET /api/sites/:id/visual-rack-report', () => {
+    it('should download a DOCX visual rack report for selected rack IDs', async () => {
+      const site = await siteModel.create({
+        name: 'Rack Report Site',
+        code: 'RRS',
+        created_by: testUser.id,
+      });
+
+      const rack = await siteLocationModel.create({
+        site_id: site.id,
+        template_type: 'DATACENTRE',
+        floor: '1',
+        suite: 'A',
+        row: 'R1',
+        rack: '01',
+        rack_size_u: 42,
+        label: 'RACK',
+      });
+
+      await db.execute(
+        `INSERT INTO sids (site_id, sid_number, hostname, status, location_id, rack_u)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [site.id, '6', 'RRS-PDU', 'Active', rack.id, '1']
+      );
+
+      const response = await request(app)
+        .get(`/api/sites/${site.id}/visual-rack-report?rackIds=${rack.id}`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .buffer(true)
+        .parse(parseBinaryResponse)
+        .expect(200);
+
+      expect(response.headers['content-type']).toContain(
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      );
+      expect(response.headers['content-disposition']).toMatch(/filename="RRS_visual_rack_report_\d{8}_\d{6}\.docx"/);
+
+      const zip = new AdmZip(response.body);
+      const documentXml = zip.readAsText('word/document.xml');
+      expect(documentXml).toContain('InfraDB – Visual Rack Report');
+      expect(documentXml).toContain('RRS-PDU');
+      expect(documentXml).toContain('U1');
     });
   });
 });

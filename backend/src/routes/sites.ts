@@ -19,6 +19,11 @@ import {
   type CableReportLocation,
   type CableReportRun,
 } from '../utils/cableReportDocx.js';
+import {
+  buildCableTraceReportDocxBuffer,
+  buildSidIndexReportDocxBuffer,
+  buildVisualRackReportDocxBuffer,
+} from '../utils/mapReportsDocx.js';
 
 const router = Router();
 const siteModel = new SiteModel();
@@ -308,6 +313,10 @@ const cableTraceParamSchema = z.object({
   cableRef: z.string().min(1, 'Cable reference is required'),
 });
 
+const cableTraceReportQuerySchema = z.object({
+  refs: z.string().min(1, 'refs is required'),
+}).passthrough();
+
 function withPrefix(prefix: string, value: unknown): string {
   const raw = String(value ?? '').trim();
   if (!raw) return '';
@@ -464,11 +473,13 @@ function mapSidRowToTraceHop(
   if (!sidRow) return null;
   const sidId = Number(sidRow.sid_id ?? sidRow.id ?? 0);
   if (!Number.isFinite(sidId) || sidId < 1) return null;
+  const sidNumber = String(sidRow.sid_number ?? '').trim();
   const rackU = parseRackUPosition(sidRow.rack_u);
   const rackUText = normalizeRackU(sidRow.rack_u);
   return {
     hostname: String(sidRow.hostname ?? '').trim() || `SID-${sidId}`,
     sidId,
+    sidNumber: sidNumber !== '' ? sidNumber : null,
     manufacturer: String(sidRow.manufacturer ?? '').trim() || null,
     modelName: String(sidRow.model_name ?? '').trim() || null,
     rackLocation: formatRackLocationPath(sidRow),
@@ -479,6 +490,247 @@ function mapSidRowToTraceHop(
       overrides?.portLabel ??
       (String(sidRow.switch_port ?? '').trim() !== '' ? `Port ${String(sidRow.switch_port).trim()}` : null),
     nicType: overrides?.nicType ?? (String(sidRow.nic_type ?? '').trim() || null),
+  };
+}
+
+async function resolveCableTraceData(params: { siteId: number; cableRef: string }) {
+  const { siteId, cableRef } = params;
+  const refNumber = normalizeCableRefToNumber(cableRef);
+  if (!refNumber) {
+    throw new Error('Invalid cable reference');
+  }
+
+  const adapter = getAdapter();
+  const labelRows = await adapter.query(
+    `SELECT id, ref_number, ref_string, source_location_id, destination_location_id, payload_json
+     FROM labels
+     WHERE site_id = ? AND ref_number = ?
+     LIMIT 1`,
+    [siteId, refNumber]
+  );
+  const label = (labelRows?.[0] as any) ?? null;
+  if (!label) {
+    throw new Error('Cable ref not found');
+  }
+
+  let payload: any = {};
+  try {
+    payload = label.payload_json ? JSON.parse(label.payload_json) : {};
+  } catch {
+    payload = {};
+  }
+
+  const viaPatchPanel = payload?.via_patch_panel === true;
+  const sourcePatchPanelSidIdRaw = Number(payload?.source_patch_panel_sid_id ?? payload?.patch_panel_sid_id ?? 0);
+  const sourcePatchPanelSidId = Number.isFinite(sourcePatchPanelSidIdRaw) && sourcePatchPanelSidIdRaw > 0 ? Math.trunc(sourcePatchPanelSidIdRaw) : 0;
+  const sourcePatchPanelPortRaw = Number(payload?.source_patch_panel_port ?? payload?.patch_panel_port ?? 0);
+  const sourcePatchPanelPort = Number.isFinite(sourcePatchPanelPortRaw) && sourcePatchPanelPortRaw > 0 ? String(Math.trunc(sourcePatchPanelPortRaw)) : '';
+  const destinationPatchPanelSidIdRaw = Number(payload?.destination_patch_panel_sid_id ?? 0);
+  const destinationPatchPanelSidId = Number.isFinite(destinationPatchPanelSidIdRaw) && destinationPatchPanelSidIdRaw > 0 ? Math.trunc(destinationPatchPanelSidIdRaw) : 0;
+  const destinationPatchPanelPortRaw = Number(payload?.destination_patch_panel_port ?? 0);
+  const destinationPatchPanelPort = Number.isFinite(destinationPatchPanelPortRaw) && destinationPatchPanelPortRaw > 0 ? String(Math.trunc(destinationPatchPanelPortRaw)) : '';
+
+  const sourceConnectedSidIdRaw = Number(payload?.source_connected_sid_id ?? 0);
+  const sourceConnectedSidId = Number.isFinite(sourceConnectedSidIdRaw) && sourceConnectedSidIdRaw > 0 ? Math.trunc(sourceConnectedSidIdRaw) : 0;
+  const sourceConnectedHostname = String(payload?.source_connected_hostname ?? '').trim();
+  const sourceConnectedPort = String(payload?.source_connected_port ?? '').trim();
+
+  const destinationConnectedSidIdRaw = Number(payload?.destination_connected_sid_id ?? 0);
+  const destinationConnectedSidId = Number.isFinite(destinationConnectedSidIdRaw) && destinationConnectedSidIdRaw > 0 ? Math.trunc(destinationConnectedSidIdRaw) : 0;
+  const destinationConnectedHostname = String(payload?.destination_connected_hostname ?? '').trim();
+  const destinationConnectedPort = String(payload?.destination_connected_port ?? '').trim();
+
+  const sourceLocationId = Number(label.source_location_id ?? 0);
+  const destinationLocationId = Number(label.destination_location_id ?? 0);
+
+  const sourceSid = sourceConnectedSidId > 0
+    ? await fetchSidHopById({ adapter, siteId, sidId: sourceConnectedSidId })
+    : null;
+
+  const destinationSid = destinationConnectedSidId > 0
+    ? await fetchSidHopById({ adapter, siteId, sidId: destinationConnectedSidId })
+    : null;
+
+  const sourcePatchPanelSid = viaPatchPanel && sourcePatchPanelSidId > 0
+    ? await fetchSidHopById({ adapter, siteId, sidId: sourcePatchPanelSidId })
+    : null;
+
+  const destinationPatchPanelSid = viaPatchPanel && destinationPatchPanelSidId > 0
+    ? await fetchSidHopById({ adapter, siteId, sidId: destinationPatchPanelSidId })
+    : null;
+
+  const hops: any[] = [];
+
+  const buildUnknownEndpointHop = async (endpointParams: {
+    locationId: number;
+    hostname: string;
+    connectedPort: string;
+  }) => {
+    const { locationId, hostname, connectedPort } = endpointParams;
+    let locationText: string | null = null;
+
+    if (locationId > 0) {
+      const locationRows = await adapter.query(
+        `SELECT
+           sl.template_type,
+           sl.floor,
+           sl.suite,
+           sl.\`row\` as \`row\`,
+           sl.rack,
+           sl.area,
+           COALESCE(NULLIF(TRIM(sl.label), ''), si.code) AS effective_label
+         FROM site_locations sl
+         JOIN sites si ON si.id = sl.site_id
+         WHERE sl.site_id = ? AND sl.id = ?
+         LIMIT 1`,
+        [siteId, locationId]
+      );
+      const loc = (locationRows?.[0] as any) ?? null;
+      locationText = loc ? formatRackLocationPath(loc) : null;
+    }
+
+    return {
+      hostname: hostname || 'Unknown',
+      sidId: null,
+      sidNumber: null,
+      manufacturer: null,
+      modelName: null,
+      rackLocation: locationText,
+      rackU: null,
+      rackUText: null,
+      rackUnits: null,
+      portLabel: connectedPort !== '' ? `Port ${connectedPort}` : null,
+      nicType: null,
+    };
+  };
+
+  if (sourceSid) {
+    hops.push(
+      mapSidRowToTraceHop(sourceSid, {
+        portLabel: sourceConnectedPort !== ''
+          ? `Port ${sourceConnectedPort}`
+          : String(sourceSid.switch_port ?? '').trim() !== ''
+            ? `Port ${String(sourceSid.switch_port).trim()}`
+            : null,
+        nicType: String(sourceSid.nic_type ?? '').trim() || null,
+      })
+    );
+  } else if (sourceConnectedHostname !== '' || sourceConnectedPort !== '') {
+    hops.push(
+      await buildUnknownEndpointHop({
+        locationId: sourceLocationId,
+        hostname: sourceConnectedHostname,
+        connectedPort: sourceConnectedPort,
+      })
+    );
+  } else if (sourceLocationId > 0) {
+    const locationRows = await adapter.query(
+      `SELECT
+         sl.template_type,
+         sl.floor,
+         sl.suite,
+         sl.\`row\` as \`row\`,
+         sl.rack,
+         sl.area,
+         COALESCE(NULLIF(TRIM(sl.label), ''), si.code) AS effective_label
+       FROM site_locations sl
+       JOIN sites si ON si.id = sl.site_id
+       WHERE sl.site_id = ? AND sl.id = ?
+       LIMIT 1`,
+      [siteId, sourceLocationId]
+    );
+    const srcLoc = (locationRows?.[0] as any) ?? null;
+    hops.push({
+      hostname: 'Unknown',
+      sidId: null,
+      sidNumber: null,
+      manufacturer: null,
+      modelName: null,
+      rackLocation: srcLoc ? formatRackLocationPath(srcLoc) : null,
+      rackU: null,
+      rackUText: null,
+      rackUnits: null,
+      portLabel: null,
+      nicType: null,
+    });
+  }
+
+  if (sourcePatchPanelSid) {
+    const patchHop = mapSidRowToTraceHop(sourcePatchPanelSid, {
+      portLabel: sourcePatchPanelPort !== '' ? `Port ${sourcePatchPanelPort}` : null,
+      nicType: null,
+    });
+    if (patchHop) {
+      hops.push(patchHop);
+    }
+  }
+
+  if (destinationPatchPanelSid) {
+    const patchHop = mapSidRowToTraceHop(destinationPatchPanelSid, {
+      portLabel: destinationPatchPanelPort !== '' ? `Port ${destinationPatchPanelPort}` : null,
+      nicType: null,
+    });
+    if (patchHop) {
+      hops.push(patchHop);
+    }
+  }
+
+  if (destinationSid) {
+    const destHop = mapSidRowToTraceHop(destinationSid, {
+      portLabel: destinationConnectedPort !== ''
+        ? `Port ${destinationConnectedPort}`
+        : String(destinationSid.switch_port ?? '').trim() !== ''
+          ? `Port ${String(destinationSid.switch_port).trim()}`
+          : null,
+      nicType: String(destinationSid.nic_type ?? '').trim() || null,
+    });
+    if (destHop && !hops.some((h) => h && h.sidId === destHop.sidId)) {
+      hops.push(destHop);
+    }
+  } else if (destinationConnectedHostname !== '' || destinationConnectedPort !== '') {
+    hops.push(
+      await buildUnknownEndpointHop({
+        locationId: destinationLocationId,
+        hostname: destinationConnectedHostname,
+        connectedPort: destinationConnectedPort,
+      })
+    );
+  } else if (destinationLocationId > 0) {
+    const locationRows = await adapter.query(
+      `SELECT
+         sl.template_type,
+         sl.floor,
+         sl.suite,
+         sl.\`row\` as \`row\`,
+         sl.rack,
+         sl.area,
+         COALESCE(NULLIF(TRIM(sl.label), ''), si.code) AS effective_label
+       FROM site_locations sl
+       JOIN sites si ON si.id = sl.site_id
+       WHERE sl.site_id = ? AND sl.id = ?
+       LIMIT 1`,
+      [siteId, destinationLocationId]
+    );
+    const dstLoc = (locationRows?.[0] as any) ?? null;
+    hops.push({
+      hostname: 'Unknown',
+      sidId: null,
+      sidNumber: null,
+      manufacturer: null,
+      modelName: null,
+      rackLocation: dstLoc ? formatRackLocationPath(dstLoc) : null,
+      rackU: null,
+      rackUText: null,
+      rackUnits: null,
+      portLabel: null,
+      nicType: null,
+    });
+  }
+
+  return {
+    cableRef: `#${String(refNumber).padStart(4, '0')}`,
+    labelId: Number(label.id),
+    hops: hops.filter(Boolean),
   };
 }
 
@@ -1158,7 +1410,17 @@ router.get(
         LEFT JOIN site_locations sl ON sl.id = s.location_id
         LEFT JOIN sites si ON si.id = s.site_id
         ${whereSql}
-        ORDER BY s.sid_number ASC
+        ORDER BY
+          CASE
+            WHEN TRIM(COALESCE(s.sid_number, '')) REGEXP '^[0-9]+$' THEN 0
+            ELSE 1
+          END ASC,
+          CASE
+            WHEN TRIM(COALESCE(s.sid_number, '')) REGEXP '^[0-9]+$' THEN CAST(TRIM(s.sid_number) AS UNSIGNED)
+            ELSE NULL
+          END ASC,
+          TRIM(COALESCE(s.sid_number, '')) ASC,
+          s.id ASC
         LIMIT ${safeLimit} OFFSET ${safeOffset}`,
         params
       );
@@ -5225,244 +5487,23 @@ router.get(
     try {
       const { id: siteId } = siteIdSchema.parse(req.params);
       const { cableRef } = cableTraceParamSchema.parse(req.params);
-      const refNumber = normalizeCableRefToNumber(cableRef);
-      if (!refNumber) {
-        return res.status(400).json({ success: false, error: 'Invalid cable reference' } as ApiResponse);
-      }
-
-      const adapter = getAdapter();
-      const labelRows = await adapter.query(
-        `SELECT id, ref_number, ref_string, source_location_id, destination_location_id, payload_json
-         FROM labels
-         WHERE site_id = ? AND ref_number = ?
-         LIMIT 1`,
-        [siteId, refNumber]
-      );
-      const label = (labelRows?.[0] as any) ?? null;
-      if (!label) {
-        return res.status(404).json({ success: false, error: 'Cable ref not found' } as ApiResponse);
-      }
-
-      let payload: any = {};
-      try {
-        payload = label.payload_json ? JSON.parse(label.payload_json) : {};
-      } catch {
-        payload = {};
-      }
-
-      const viaPatchPanel = payload?.via_patch_panel === true;
-      const sourcePatchPanelSidIdRaw = Number(payload?.source_patch_panel_sid_id ?? payload?.patch_panel_sid_id ?? 0);
-      const sourcePatchPanelSidId = Number.isFinite(sourcePatchPanelSidIdRaw) && sourcePatchPanelSidIdRaw > 0 ? Math.trunc(sourcePatchPanelSidIdRaw) : 0;
-      const sourcePatchPanelPortRaw = Number(payload?.source_patch_panel_port ?? payload?.patch_panel_port ?? 0);
-      const sourcePatchPanelPort = Number.isFinite(sourcePatchPanelPortRaw) && sourcePatchPanelPortRaw > 0 ? String(Math.trunc(sourcePatchPanelPortRaw)) : '';
-      const destinationPatchPanelSidIdRaw = Number(payload?.destination_patch_panel_sid_id ?? 0);
-      const destinationPatchPanelSidId = Number.isFinite(destinationPatchPanelSidIdRaw) && destinationPatchPanelSidIdRaw > 0 ? Math.trunc(destinationPatchPanelSidIdRaw) : 0;
-      const destinationPatchPanelPortRaw = Number(payload?.destination_patch_panel_port ?? 0);
-      const destinationPatchPanelPort = Number.isFinite(destinationPatchPanelPortRaw) && destinationPatchPanelPortRaw > 0 ? String(Math.trunc(destinationPatchPanelPortRaw)) : '';
-
-      const sourceConnectedSidIdRaw = Number(payload?.source_connected_sid_id ?? 0);
-      const sourceConnectedSidId = Number.isFinite(sourceConnectedSidIdRaw) && sourceConnectedSidIdRaw > 0 ? Math.trunc(sourceConnectedSidIdRaw) : 0;
-      const sourceConnectedHostname = String(payload?.source_connected_hostname ?? '').trim();
-      const sourceConnectedPort = String(payload?.source_connected_port ?? '').trim();
-
-      const destinationConnectedSidIdRaw = Number(payload?.destination_connected_sid_id ?? 0);
-      const destinationConnectedSidId = Number.isFinite(destinationConnectedSidIdRaw) && destinationConnectedSidIdRaw > 0 ? Math.trunc(destinationConnectedSidIdRaw) : 0;
-      const destinationConnectedHostname = String(payload?.destination_connected_hostname ?? '').trim();
-      const destinationConnectedPort = String(payload?.destination_connected_port ?? '').trim();
-
-      const sourceLocationId = Number(label.source_location_id ?? 0);
-      const destinationLocationId = Number(label.destination_location_id ?? 0);
-
-      const sourceSid = sourceConnectedSidId > 0
-        ? await fetchSidHopById({ adapter, siteId, sidId: sourceConnectedSidId })
-        : null;
-
-      const destinationSid = destinationConnectedSidId > 0
-        ? await fetchSidHopById({ adapter, siteId, sidId: destinationConnectedSidId })
-        : null;
-
-      const sourcePatchPanelSid = viaPatchPanel && sourcePatchPanelSidId > 0
-        ? await fetchSidHopById({ adapter, siteId, sidId: sourcePatchPanelSidId })
-        : null;
-
-      const destinationPatchPanelSid = viaPatchPanel && destinationPatchPanelSidId > 0
-        ? await fetchSidHopById({ adapter, siteId, sidId: destinationPatchPanelSidId })
-        : null;
-
-      const hops: any[] = [];
-
-      const buildUnknownEndpointHop = async (params: {
-        locationId: number;
-        hostname: string;
-        connectedPort: string;
-      }) => {
-        const { locationId, hostname, connectedPort } = params;
-        let locationText: string | null = null;
-
-        if (locationId > 0) {
-          const locationRows = await adapter.query(
-            `SELECT
-               sl.template_type,
-               sl.floor,
-               sl.suite,
-               sl.\`row\` as \`row\`,
-               sl.rack,
-               sl.area,
-               COALESCE(NULLIF(TRIM(sl.label), ''), si.code) AS effective_label
-             FROM site_locations sl
-             JOIN sites si ON si.id = sl.site_id
-             WHERE sl.site_id = ? AND sl.id = ?
-             LIMIT 1`,
-            [siteId, locationId]
-          );
-          const loc = (locationRows?.[0] as any) ?? null;
-          locationText = loc ? formatRackLocationPath(loc) : null;
-        }
-
-        return {
-          hostname: hostname || 'Unknown',
-          sidId: null,
-          manufacturer: null,
-          modelName: null,
-          rackLocation: locationText,
-          rackU: null,
-          rackUText: null,
-          rackUnits: null,
-          portLabel: connectedPort !== '' ? `Port ${connectedPort}` : null,
-          nicType: null,
-        };
-      };
-
-      if (sourceSid) {
-        hops.push(
-          mapSidRowToTraceHop(sourceSid, {
-            portLabel: sourceConnectedPort !== ''
-              ? `Port ${sourceConnectedPort}`
-              : String(sourceSid.switch_port ?? '').trim() !== ''
-                ? `Port ${String(sourceSid.switch_port).trim()}`
-                : null,
-            nicType: String(sourceSid.nic_type ?? '').trim() || null,
-          })
-        );
-      } else if (sourceConnectedHostname !== '' || sourceConnectedPort !== '') {
-        hops.push(
-          await buildUnknownEndpointHop({
-            locationId: sourceLocationId,
-            hostname: sourceConnectedHostname,
-            connectedPort: sourceConnectedPort,
-          })
-        );
-      } else if (sourceLocationId > 0) {
-        const locationRows = await adapter.query(
-          `SELECT
-             sl.template_type,
-             sl.floor,
-             sl.suite,
-             sl.\`row\` as \`row\`,
-             sl.rack,
-             sl.area,
-             COALESCE(NULLIF(TRIM(sl.label), ''), si.code) AS effective_label
-           FROM site_locations sl
-           JOIN sites si ON si.id = sl.site_id
-           WHERE sl.site_id = ? AND sl.id = ?
-           LIMIT 1`,
-          [siteId, sourceLocationId]
-        );
-        const srcLoc = (locationRows?.[0] as any) ?? null;
-        hops.push({
-          hostname: 'Unknown',
-          sidId: null,
-          manufacturer: null,
-          modelName: null,
-          rackLocation: srcLoc ? formatRackLocationPath(srcLoc) : null,
-          rackU: null,
-          rackUText: null,
-          rackUnits: null,
-          portLabel: null,
-          nicType: null,
-        });
-      }
-
-      if (sourcePatchPanelSid) {
-        const patchHop = mapSidRowToTraceHop(sourcePatchPanelSid, {
-          portLabel: sourcePatchPanelPort !== '' ? `Port ${sourcePatchPanelPort}` : null,
-          nicType: null,
-        });
-        if (patchHop) {
-          hops.push(patchHop);
-        }
-      }
-
-      if (destinationPatchPanelSid) {
-        const patchHop = mapSidRowToTraceHop(destinationPatchPanelSid, {
-          portLabel: destinationPatchPanelPort !== '' ? `Port ${destinationPatchPanelPort}` : null,
-          nicType: null,
-        });
-        if (patchHop) {
-          hops.push(patchHop);
-        }
-      }
-
-      if (destinationSid) {
-        const destHop = mapSidRowToTraceHop(destinationSid, {
-          portLabel: destinationConnectedPort !== ''
-            ? `Port ${destinationConnectedPort}`
-            : String(destinationSid.switch_port ?? '').trim() !== ''
-              ? `Port ${String(destinationSid.switch_port).trim()}`
-              : null,
-          nicType: String(destinationSid.nic_type ?? '').trim() || null,
-        });
-        if (destHop && !hops.some((h) => h && h.sidId === destHop.sidId)) {
-          hops.push(destHop);
-        }
-      } else if (destinationConnectedHostname !== '' || destinationConnectedPort !== '') {
-        hops.push(
-          await buildUnknownEndpointHop({
-            locationId: destinationLocationId,
-            hostname: destinationConnectedHostname,
-            connectedPort: destinationConnectedPort,
-          })
-        );
-      } else if (destinationLocationId > 0) {
-        const locationRows = await adapter.query(
-          `SELECT
-             sl.template_type,
-             sl.floor,
-             sl.suite,
-             sl.\`row\` as \`row\`,
-             sl.rack,
-             sl.area,
-             COALESCE(NULLIF(TRIM(sl.label), ''), si.code) AS effective_label
-           FROM site_locations sl
-           JOIN sites si ON si.id = sl.site_id
-           WHERE sl.site_id = ? AND sl.id = ?
-           LIMIT 1`,
-          [siteId, destinationLocationId]
-        );
-        const dstLoc = (locationRows?.[0] as any) ?? null;
-        hops.push({
-          hostname: 'Unknown',
-          sidId: null,
-          manufacturer: null,
-          modelName: null,
-          rackLocation: dstLoc ? formatRackLocationPath(dstLoc) : null,
-          rackU: null,
-          rackUText: null,
-          rackUnits: null,
-          portLabel: null,
-          nicType: null,
-        });
-      }
+      const trace = await resolveCableTraceData({ siteId, cableRef });
 
       return res.json({
         success: true,
         data: {
-          cableRef: `#${String(refNumber).padStart(4, '0')}`,
-          labelId: Number(label.id),
-          hops: hops.filter(Boolean),
+          cableRef: trace.cableRef,
+          labelId: trace.labelId,
+          hops: trace.hops,
         },
       } as ApiResponse);
     } catch (error) {
+      if (error instanceof Error && error.message === 'Cable ref not found') {
+        return res.status(404).json({ success: false, error: 'Cable ref not found' } as ApiResponse);
+      }
+      if (error instanceof Error && error.message === 'Invalid cable reference') {
+        return res.status(400).json({ success: false, error: 'Invalid cable reference' } as ApiResponse);
+      }
       if (error instanceof z.ZodError) {
         return res.status(400).json({
           success: false,
@@ -6270,6 +6311,300 @@ router.get(
       } as ApiResponse);
     }
   }
+);
+
+/**
+ * GET /api/sites/:id/sid-index-report
+ * Download a Word document containing the full site SID index.
+ */
+router.get(
+  '/:id/sid-index-report',
+  authenticateToken,
+  resolveSiteAccess(req => Number(req.params.id)),
+  async (req: Request, res: Response) => {
+    try {
+      const { id: siteId } = siteIdSchema.parse(req.params);
+      const siteName = String(req.site?.name ?? '').trim();
+      const siteCode = String(req.site?.code ?? '').trim().toUpperCase();
+      if (!siteName || !siteCode) {
+        return res.status(500).json({ success: false, error: 'Failed to resolve site details' } as ApiResponse);
+      }
+
+      const createdAt = new Date();
+      const rows = await getAdapter().query(
+        `SELECT
+           s.sid_number,
+           s.hostname,
+           s.status,
+           s.primary_ip,
+           sl.template_type,
+           sl.floor,
+           sl.suite,
+           sl.\`row\` as \`row\`,
+           sl.rack,
+           sl.area,
+           COALESCE(NULLIF(TRIM(sl.label), ''), si.code) as effective_label
+         FROM sids s
+         LEFT JOIN site_locations sl ON sl.id = s.location_id
+         LEFT JOIN sites si ON si.id = s.site_id
+         WHERE s.site_id = ?
+         ORDER BY
+           CASE
+             WHEN TRIM(COALESCE(s.sid_number, '')) REGEXP '^[0-9]+$' THEN 0
+             ELSE 1
+           END ASC,
+           CASE
+             WHEN TRIM(COALESCE(s.sid_number, '')) REGEXP '^[0-9]+$' THEN CAST(TRIM(s.sid_number) AS UNSIGNED)
+             ELSE NULL
+           END ASC,
+           TRIM(COALESCE(s.sid_number, '')) ASC,
+           s.id ASC`,
+        [siteId],
+      );
+
+      const buffer = await buildSidIndexReportDocxBuffer({
+        siteName,
+        siteCode,
+        createdAtText: formatPrintedDateDDMonYYYY_HHMM(createdAt),
+        rows: (rows ?? []).map((row: any) => ({
+          sidNumber: String(row?.sid_number ?? '').trim() || 'Unknown',
+          hostname: String(row?.hostname ?? '').trim() || 'Unknown',
+          status: String(row?.status ?? '').trim() || 'Unknown',
+          locationPath: row ? formatRackLocationPath(row) : 'Unknown',
+          primaryIp: String(row?.primary_ip ?? '').trim() || 'Unknown',
+        })),
+      });
+
+      const ts = formatTimestampYYYYMMDD_HHMMSS(createdAt);
+      const filename = `${siteCode}_sid_index_report_${ts}.docx`;
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('X-Report-Created-On', formatPrintedDateDDMonYYYY_HHMM(createdAt));
+      return res.status(200).send(buffer);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ success: false, error: 'Validation failed', details: error.errors } as ApiResponse);
+      }
+      console.error('SID index report generation error:', error);
+      return res.status(500).json({ success: false, error: 'Failed to generate SID index report' } as ApiResponse);
+    }
+  },
+);
+
+/**
+ * GET /api/sites/:id/cable-trace-report?refs=#0001,#0002
+ * Download a Word document containing one or more cable traces.
+ */
+router.get(
+  '/:id/cable-trace-report',
+  authenticateToken,
+  resolveSiteAccess(req => Number(req.params.id)),
+  async (req: Request, res: Response) => {
+    try {
+      const { id: siteId } = siteIdSchema.parse(req.params);
+      const parsedQuery = cableTraceReportQuerySchema.parse(req.query);
+      const rawRefs = String(parsedQuery.refs ?? '');
+      const refs = rawRefs
+        .split(',')
+        .map((ref) => ref.trim())
+        .filter((ref) => ref !== '')
+        .slice(0, 100);
+
+      const uniqueRefs: string[] = [];
+      const seen = new Set<string>();
+      for (const ref of refs) {
+        const key = ref.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        uniqueRefs.push(ref);
+      }
+
+      if (!uniqueRefs.length) {
+        return res.status(400).json({ success: false, error: 'At least one cable reference is required' } as ApiResponse);
+      }
+
+      const siteName = String(req.site?.name ?? '').trim();
+      const siteCode = String(req.site?.code ?? '').trim().toUpperCase();
+      if (!siteName || !siteCode) {
+        return res.status(500).json({ success: false, error: 'Failed to resolve site details' } as ApiResponse);
+      }
+
+      const createdAt = new Date();
+      const items = await Promise.all(
+        uniqueRefs.map(async (ref) => {
+          try {
+            const trace = await resolveCableTraceData({ siteId, cableRef: ref });
+            return {
+              cableRef: trace.cableRef,
+              hops: trace.hops.map((hop: any) => ({
+                hostname: String(hop?.hostname ?? '').trim() || 'Unknown',
+                sidNumber: String(hop?.sidNumber ?? '').trim() || (hop?.sidId ? String(hop.sidId) : 'Unknown'),
+                manufacturer: String(hop?.manufacturer ?? '').trim() || 'Unknown',
+                modelName: String(hop?.modelName ?? '').trim() || 'Unknown',
+                rackUText: String(hop?.rackUText ?? '').trim() || 'Unknown',
+                rackLocation: String(hop?.rackLocation ?? '').trim() || 'Unknown location',
+                connectedPort: String([hop?.portLabel || null, hop?.nicType || null].filter(Boolean).join(' ') || 'Unknown'),
+              })),
+            };
+          } catch (error) {
+            return {
+              cableRef: ref,
+              hops: [],
+              error: error instanceof Error ? error.message : 'Failed to resolve cable trace',
+            };
+          }
+        })
+      );
+
+      const buffer = await buildCableTraceReportDocxBuffer({
+        siteName,
+        siteCode,
+        createdAtText: formatPrintedDateDDMonYYYY_HHMM(createdAt),
+        items,
+      });
+
+      const ts = formatTimestampYYYYMMDD_HHMMSS(createdAt);
+      const filename = `${siteCode}_cable_trace_report_${ts}.docx`;
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('X-Report-Created-On', formatPrintedDateDDMonYYYY_HHMM(createdAt));
+      return res.status(200).send(buffer);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ success: false, error: 'Validation failed', details: error.errors } as ApiResponse);
+      }
+      console.error('Cable trace report generation error:', error);
+      return res.status(500).json({ success: false, error: 'Failed to generate cable trace report' } as ApiResponse);
+    }
+  },
+);
+
+/**
+ * GET /api/sites/:id/visual-rack-report?rackIds=1,2,3
+ * Download a Word document containing selected rack visual elevations.
+ */
+router.get(
+  '/:id/visual-rack-report',
+  authenticateToken,
+  resolveSiteAccess(req => Number(req.params.id)),
+  async (req: Request, res: Response) => {
+    try {
+      const { id: siteId } = siteIdSchema.parse(req.params);
+      const queryParsed = getRackElevationQuerySchema.parse(req.query);
+      const rackIds = String(queryParsed.rackIds)
+        .split(',')
+        .map((part) => Number(part.trim()))
+        .filter((id) => Number.isFinite(id) && id > 0)
+        .slice(0, 100);
+
+      if (rackIds.length === 0) {
+        return res.status(400).json({ success: false, error: 'rackIds must contain at least one valid rack id' } as ApiResponse);
+      }
+
+      const siteName = String(req.site?.name ?? '').trim();
+      const siteCode = String(req.site?.code ?? '').trim().toUpperCase();
+      if (!siteName || !siteCode) {
+        return res.status(500).json({ success: false, error: 'Failed to resolve site details' } as ApiResponse);
+      }
+
+      const adapter = getAdapter();
+      const rackRows = await adapter.query(
+        `SELECT
+           sl.id,
+           sl.template_type,
+           sl.floor,
+           sl.suite,
+           sl.\`row\` as \`row\`,
+           sl.rack,
+           sl.area,
+           sl.rack_size_u,
+           COALESCE(NULLIF(TRIM(sl.label), ''), si.code) AS effective_label,
+           si.code as site_code
+         FROM site_locations sl
+         JOIN sites si ON si.id = sl.site_id
+         WHERE sl.site_id = ?
+           AND sl.id IN (${rackIds.map(() => '?').join(', ')})
+           AND UPPER(TRIM(COALESCE(sl.template_type, 'DATACENTRE'))) = 'DATACENTRE'
+         ORDER BY sl.id ASC`,
+        [siteId, ...rackIds],
+      );
+
+      if (!rackRows.length) {
+        return res.status(404).json({ success: false, error: 'No rack locations found for the selected IDs' } as ApiResponse);
+      }
+
+      const validRackIds = rackRows.map((r: any) => Number(r.id)).filter((id) => Number.isFinite(id) && id > 0);
+      const sidRows = await adapter.query(
+        `SELECT
+           s.id,
+           s.sid_number,
+           s.hostname,
+           s.location_id,
+           s.rack_u,
+           dm.rack_u AS model_rack_u
+         FROM sids s
+         LEFT JOIN sid_device_models dm ON dm.id = s.device_model_id
+         WHERE s.site_id = ?
+           AND s.location_id IN (${validRackIds.map(() => '?').join(', ')})
+           AND LOWER(TRIM(COALESCE(s.status, ''))) <> 'deleted'
+         ORDER BY s.location_id ASC, s.id ASC`,
+        [siteId, ...validRackIds],
+      );
+
+      const byRack = new Map<number, Array<{ uPosition: number; rackUnits: number; sidNumber: string; hostname: string }>>();
+      for (const sid of sidRows ?? []) {
+        const rackId = Number((sid as any).location_id);
+        if (!Number.isFinite(rackId) || rackId < 1) continue;
+        const uPosition = parseRackUPosition((sid as any).rack_u);
+        if (!uPosition) continue;
+        const modelRackUnits = parseRackUPosition((sid as any).model_rack_u);
+        const rackUnits = Number.isFinite(modelRackUnits as any) && Number(modelRackUnits) > 0 ? Number(modelRackUnits) : 1;
+
+        const existing = byRack.get(rackId) ?? [];
+        if (!existing.some((o) => o.uPosition === uPosition)) {
+          existing.push({
+            uPosition,
+            rackUnits,
+            sidNumber: String((sid as any).sid_number ?? '').trim() || 'Unknown',
+            hostname: String((sid as any).hostname ?? '').trim() || 'Unknown',
+          });
+        }
+        byRack.set(rackId, existing);
+      }
+
+      const racks = (rackRows ?? []).map((rack: any) => {
+        const rackId = Number(rack.id);
+        const rackSizeRaw = Number(rack?.rack_size_u ?? 0);
+        const rackSizeU = Number.isFinite(rackSizeRaw) && rackSizeRaw > 0 ? Math.trunc(rackSizeRaw) : 42;
+        return {
+          rackLocation: formatRackLocationPath(rack),
+          rackSizeU,
+          occupants: (byRack.get(rackId) ?? []).sort((a, b) => b.uPosition - a.uPosition),
+        };
+      });
+
+      const createdAt = new Date();
+      const buffer = await buildVisualRackReportDocxBuffer({
+        siteName,
+        siteCode,
+        createdAtText: formatPrintedDateDDMonYYYY_HHMM(createdAt),
+        racks,
+      });
+
+      const ts = formatTimestampYYYYMMDD_HHMMSS(createdAt);
+      const filename = `${siteCode}_visual_rack_report_${ts}.docx`;
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('X-Report-Created-On', formatPrintedDateDDMonYYYY_HHMM(createdAt));
+      return res.status(200).send(buffer);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ success: false, error: 'Validation failed', details: error.errors } as ApiResponse);
+      }
+      console.error('Visual rack report generation error:', error);
+      return res.status(500).json({ success: false, error: 'Failed to generate visual rack report' } as ApiResponse);
+    }
+  },
 );
 
 /**

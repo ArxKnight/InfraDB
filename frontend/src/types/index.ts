@@ -188,6 +188,7 @@ export interface MapRackElevation {
 export interface MapCableTraceHop {
   hostname: string;
   sidId: number | null;
+  sidNumber?: string | null;
   manufacturer: string | null;
   modelName: string | null;
   rackLocation: string | null;

@@ -1219,6 +1219,28 @@ class ApiClient {
     return this.downloadGetFileWithName(`/sites/${siteId}/cable-report`);
   }
 
+  async downloadSiteSidIndexReport(siteId: number): Promise<{ blob: Blob; filename?: string }> {
+    return this.downloadGetFileWithName(`/sites/${siteId}/sid-index-report`);
+  }
+
+  async downloadSiteCableTraceReport(siteId: number, refs: string[]): Promise<{ blob: Blob; filename?: string }> {
+    const normalized = refs
+      .map((ref) => String(ref ?? '').trim())
+      .filter((ref) => ref !== '');
+    const params = new URLSearchParams();
+    params.set('refs', normalized.join(','));
+    return this.downloadGetFileWithName(`/sites/${siteId}/cable-trace-report?${params.toString()}`);
+  }
+
+  async downloadSiteVisualRackReport(siteId: number, rackIds: number[]): Promise<{ blob: Blob; filename?: string }> {
+    const filtered = rackIds
+      .map((id) => Number(id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    const params = new URLSearchParams();
+    params.set('rackIds', filtered.join(','));
+    return this.downloadGetFileWithName(`/sites/${siteId}/visual-rack-report?${params.toString()}`);
+  }
+
   async downloadLabelZpl(labelId: number, siteId: number): Promise<Blob> {
     return this.downloadGetFile(`/labels/${labelId}/zpl?site_id=${siteId}`);
   }

@@ -15,7 +15,7 @@ type CableTraceViewProps = {
 
 function hopText(hop: MapCableTraceHop): string {
   const displayHostname = String(hop.hostname ?? '').trim() || 'Unknown';
-  const displaySid = hop.sidId ? String(hop.sidId) : 'Unknown';
+  const displaySid = String(hop.sidNumber ?? '').trim() || (hop.sidId ? String(hop.sidId) : 'Unknown');
   const displayRackU = String(hop.rackUText ?? '').trim() || 'Unknown';
   const line1 = `${displayHostname} (SID: ${displaySid})`;
   const line2 = `${hop.manufacturer || 'Unknown'} - ${hop.modelName || 'Unknown'} | (${displayRackU})`;
@@ -103,7 +103,7 @@ const CableTraceView: React.FC<CableTraceViewProps> = ({ siteId, cableRef, hops 
         {hops.map((hop, idx) => {
           const connected = [hop.portLabel || null, hop.nicType || null].filter(Boolean).join(' ');
           const displayHostname = String(hop.hostname ?? '').trim() || 'Unknown';
-          const displaySid = hop.sidId ? String(hop.sidId) : 'Unknown';
+          const displaySid = String(hop.sidNumber ?? '').trim() || (hop.sidId ? String(hop.sidId) : 'Unknown');
           const displayRackU = String(hop.rackUText ?? '').trim() || 'Unknown';
           const isFirst = idx === 0;
           const isLast = idx === hops.length - 1;

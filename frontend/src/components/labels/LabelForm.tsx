@@ -867,151 +867,157 @@ const LabelForm: React.FC<LabelFormProps> = ({
             {viaPatchPanel && (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="source_patch_panel_sid_id">Source Patch Panel</Label>
-                    <input type="hidden" {...register('source_patch_panel_sid_id', { valueAsNumber: true })} />
-                    <input type="hidden" {...register('patch_panel_sid_id', { valueAsNumber: true })} />
-                    <Select
-                      value={selectedSourcePatchPanelSidId > 0 ? String(selectedSourcePatchPanelSidId) : ''}
-                      onValueChange={(value) => {
-                        const parsed = Number(value);
-                        setValue('source_patch_panel_sid_id', parsed, { shouldValidate: true });
-                        setValue('patch_panel_sid_id', parsed, { shouldValidate: true });
-                        setValue('source_patch_panel_port', undefined, { shouldValidate: true });
-                        setValue('patch_panel_port', undefined, { shouldValidate: true });
-                      }}
-                      disabled={isLoading || patchPanelSids.length === 0}
-                    >
-                      <SelectTrigger id="source_patch_panel_sid_id">
-                        <SelectValue placeholder={patchPanelSids.length ? 'Select source patch panel SID' : 'No patch panel SIDs available'} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {patchPanelSids.map((sid) => (
-                          <SelectItem key={`src-pp-${sid.id}`} value={String(sid.id)}>
-                            {sid.sid_number}
-                            {sid.hostname ? ` — ${sid.hostname}` : ''}
-                            {sid.maxPorts ? ` (${sid.maxPorts} ports)` : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {errors.source_patch_panel_sid_id && (
-                      <p className="text-sm text-destructive">{errors.source_patch_panel_sid_id.message}</p>
-                    )}
-                    {errors.patch_panel_sid_id && (
-                      <p className="text-sm text-destructive">{errors.patch_panel_sid_id.message}</p>
-                    )}
+                  <div className="space-y-3">
+                    <div className="text-sm font-medium">Source Endpoint</div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="source_patch_panel_sid_id">Source Patch Panel</Label>
+                      <input type="hidden" {...register('source_patch_panel_sid_id', { valueAsNumber: true })} />
+                      <input type="hidden" {...register('patch_panel_sid_id', { valueAsNumber: true })} />
+                      <Select
+                        value={selectedSourcePatchPanelSidId > 0 ? String(selectedSourcePatchPanelSidId) : ''}
+                        onValueChange={(value) => {
+                          const parsed = Number(value);
+                          setValue('source_patch_panel_sid_id', parsed, { shouldValidate: true });
+                          setValue('patch_panel_sid_id', parsed, { shouldValidate: true });
+                          setValue('source_patch_panel_port', undefined, { shouldValidate: true });
+                          setValue('patch_panel_port', undefined, { shouldValidate: true });
+                        }}
+                        disabled={isLoading || patchPanelSids.length === 0}
+                      >
+                        <SelectTrigger id="source_patch_panel_sid_id">
+                          <SelectValue placeholder={patchPanelSids.length ? 'Select source patch panel SID' : 'No patch panel SIDs available'} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {patchPanelSids.map((sid) => (
+                            <SelectItem key={`src-pp-${sid.id}`} value={String(sid.id)}>
+                              {sid.sid_number}
+                              {sid.hostname ? ` — ${sid.hostname}` : ''}
+                              {sid.maxPorts ? ` (${sid.maxPorts} ports)` : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {errors.source_patch_panel_sid_id && (
+                        <p className="text-sm text-destructive">{errors.source_patch_panel_sid_id.message}</p>
+                      )}
+                      {errors.patch_panel_sid_id && (
+                        <p className="text-sm text-destructive">{errors.patch_panel_sid_id.message}</p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="source_patch_panel_port">Source Patch Panel Port</Label>
+                      <input type="hidden" {...register('source_patch_panel_port', { valueAsNumber: true })} />
+                      <input type="hidden" {...register('patch_panel_port', { valueAsNumber: true })} />
+                      <Select
+                        value={Number.isFinite(Number(watchedValues.source_patch_panel_port ?? watchedValues.patch_panel_port)) && Number(watchedValues.source_patch_panel_port ?? watchedValues.patch_panel_port) > 0
+                          ? String(Number(watchedValues.source_patch_panel_port ?? watchedValues.patch_panel_port))
+                          : ''}
+                        onValueChange={(value) => {
+                          const parsed = Number(value);
+                          setValue('source_patch_panel_port', parsed, { shouldValidate: true });
+                          setValue('patch_panel_port', parsed, { shouldValidate: true });
+                        }}
+                        disabled={
+                          isLoading ||
+                          !selectedSourcePatchPanel ||
+                          !selectedSourcePatchPanelPortCount ||
+                          selectedSourcePatchPanelPortCount < 1
+                        }
+                      >
+                        <SelectTrigger id="source_patch_panel_port">
+                          <SelectValue placeholder="Select source patch panel port" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {selectedSourcePatchPanelPortCount && selectedSourcePatchPanelPortCount > 0
+                            ? Array.from({ length: selectedSourcePatchPanelPortCount }, (_, index) => index + 1).map((port) => (
+                                <SelectItem key={`src-pp-port-${port}`} value={String(port)}>
+                                  Port {port}
+                                </SelectItem>
+                              ))
+                            : null}
+                        </SelectContent>
+                      </Select>
+                      {selectedSourcePatchPanel && (!selectedSourcePatchPanelPortCount || selectedSourcePatchPanelPortCount < 1) && (
+                        <p className="text-xs text-muted-foreground">Selected source patch panel has no configured port count.</p>
+                      )}
+                      {errors.source_patch_panel_port && (
+                        <p className="text-sm text-destructive">{errors.source_patch_panel_port.message}</p>
+                      )}
+                      {errors.patch_panel_port && (
+                        <p className="text-sm text-destructive">{errors.patch_panel_port.message}</p>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="source_patch_panel_port">Source Patch Panel Port</Label>
-                    <input type="hidden" {...register('source_patch_panel_port', { valueAsNumber: true })} />
-                    <input type="hidden" {...register('patch_panel_port', { valueAsNumber: true })} />
-                    <Select
-                      value={Number.isFinite(Number(watchedValues.source_patch_panel_port ?? watchedValues.patch_panel_port)) && Number(watchedValues.source_patch_panel_port ?? watchedValues.patch_panel_port) > 0
-                        ? String(Number(watchedValues.source_patch_panel_port ?? watchedValues.patch_panel_port))
-                        : ''}
-                      onValueChange={(value) => {
-                        const parsed = Number(value);
-                        setValue('source_patch_panel_port', parsed, { shouldValidate: true });
-                        setValue('patch_panel_port', parsed, { shouldValidate: true });
-                      }}
-                      disabled={
-                        isLoading ||
-                        !selectedSourcePatchPanel ||
-                        !selectedSourcePatchPanelPortCount ||
-                        selectedSourcePatchPanelPortCount < 1
-                      }
-                    >
-                      <SelectTrigger id="source_patch_panel_port">
-                        <SelectValue placeholder="Select source patch panel port" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {selectedSourcePatchPanelPortCount && selectedSourcePatchPanelPortCount > 0
-                          ? Array.from({ length: selectedSourcePatchPanelPortCount }, (_, index) => index + 1).map((port) => (
-                              <SelectItem key={`src-pp-port-${port}`} value={String(port)}>
-                                Port {port}
-                              </SelectItem>
-                            ))
-                          : null}
-                      </SelectContent>
-                    </Select>
-                    {selectedSourcePatchPanel && (!selectedSourcePatchPanelPortCount || selectedSourcePatchPanelPortCount < 1) && (
-                      <p className="text-xs text-muted-foreground">Selected source patch panel has no configured port count.</p>
-                    )}
-                    {errors.source_patch_panel_port && (
-                      <p className="text-sm text-destructive">{errors.source_patch_panel_port.message}</p>
-                    )}
-                    {errors.patch_panel_port && (
-                      <p className="text-sm text-destructive">{errors.patch_panel_port.message}</p>
-                    )}
-                  </div>
-                </div>
+                  <div className="space-y-3">
+                    <div className="text-sm font-medium">Destination Endpoint</div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="destination_patch_panel_sid_id">Destination Patch Panel</Label>
-                    <input type="hidden" {...register('destination_patch_panel_sid_id', { valueAsNumber: true })} />
-                    <Select
-                      value={selectedDestinationPatchPanelSidId > 0 ? String(selectedDestinationPatchPanelSidId) : ''}
-                      onValueChange={(value) => {
-                        setValue('destination_patch_panel_sid_id', Number(value), { shouldValidate: true });
-                        setValue('destination_patch_panel_port', undefined, { shouldValidate: true });
-                      }}
-                      disabled={isLoading || patchPanelSids.length === 0}
-                    >
-                      <SelectTrigger id="destination_patch_panel_sid_id">
-                        <SelectValue placeholder={patchPanelSids.length ? 'Select destination patch panel SID' : 'No patch panel SIDs available'} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {patchPanelSids.map((sid) => (
-                          <SelectItem key={`dst-pp-${sid.id}`} value={String(sid.id)}>
-                            {sid.sid_number}
-                            {sid.hostname ? ` — ${sid.hostname}` : ''}
-                            {sid.maxPorts ? ` (${sid.maxPorts} ports)` : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {errors.destination_patch_panel_sid_id && (
-                      <p className="text-sm text-destructive">{errors.destination_patch_panel_sid_id.message}</p>
-                    )}
-                  </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="destination_patch_panel_sid_id">Destination Patch Panel</Label>
+                      <input type="hidden" {...register('destination_patch_panel_sid_id', { valueAsNumber: true })} />
+                      <Select
+                        value={selectedDestinationPatchPanelSidId > 0 ? String(selectedDestinationPatchPanelSidId) : ''}
+                        onValueChange={(value) => {
+                          setValue('destination_patch_panel_sid_id', Number(value), { shouldValidate: true });
+                          setValue('destination_patch_panel_port', undefined, { shouldValidate: true });
+                        }}
+                        disabled={isLoading || patchPanelSids.length === 0}
+                      >
+                        <SelectTrigger id="destination_patch_panel_sid_id">
+                          <SelectValue placeholder={patchPanelSids.length ? 'Select destination patch panel SID' : 'No patch panel SIDs available'} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {patchPanelSids.map((sid) => (
+                            <SelectItem key={`dst-pp-${sid.id}`} value={String(sid.id)}>
+                              {sid.sid_number}
+                              {sid.hostname ? ` — ${sid.hostname}` : ''}
+                              {sid.maxPorts ? ` (${sid.maxPorts} ports)` : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {errors.destination_patch_panel_sid_id && (
+                        <p className="text-sm text-destructive">{errors.destination_patch_panel_sid_id.message}</p>
+                      )}
+                    </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="destination_patch_panel_port">Destination Patch Panel Port</Label>
-                    <input type="hidden" {...register('destination_patch_panel_port', { valueAsNumber: true })} />
-                    <Select
-                      value={Number.isFinite(Number(watchedValues.destination_patch_panel_port)) && Number(watchedValues.destination_patch_panel_port) > 0
-                        ? String(Number(watchedValues.destination_patch_panel_port))
-                        : ''}
-                      onValueChange={(value) => setValue('destination_patch_panel_port', Number(value), { shouldValidate: true })}
-                      disabled={
-                        isLoading ||
-                        !selectedDestinationPatchPanel ||
-                        !selectedDestinationPatchPanelPortCount ||
-                        selectedDestinationPatchPanelPortCount < 1
-                      }
-                    >
-                      <SelectTrigger id="destination_patch_panel_port">
-                        <SelectValue placeholder="Select destination patch panel port" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {selectedDestinationPatchPanelPortCount && selectedDestinationPatchPanelPortCount > 0
-                          ? Array.from({ length: selectedDestinationPatchPanelPortCount }, (_, index) => index + 1).map((port) => (
-                              <SelectItem key={`dst-pp-port-${port}`} value={String(port)}>
-                                Port {port}
-                              </SelectItem>
-                            ))
-                          : null}
-                      </SelectContent>
-                    </Select>
-                    {selectedDestinationPatchPanel && (!selectedDestinationPatchPanelPortCount || selectedDestinationPatchPanelPortCount < 1) && (
-                      <p className="text-xs text-muted-foreground">Selected destination patch panel has no configured port count.</p>
-                    )}
-                    {errors.destination_patch_panel_port && (
-                      <p className="text-sm text-destructive">{errors.destination_patch_panel_port.message}</p>
-                    )}
+                    <div className="space-y-2">
+                      <Label htmlFor="destination_patch_panel_port">Destination Patch Panel Port</Label>
+                      <input type="hidden" {...register('destination_patch_panel_port', { valueAsNumber: true })} />
+                      <Select
+                        value={Number.isFinite(Number(watchedValues.destination_patch_panel_port)) && Number(watchedValues.destination_patch_panel_port) > 0
+                          ? String(Number(watchedValues.destination_patch_panel_port))
+                          : ''}
+                        onValueChange={(value) => setValue('destination_patch_panel_port', Number(value), { shouldValidate: true })}
+                        disabled={
+                          isLoading ||
+                          !selectedDestinationPatchPanel ||
+                          !selectedDestinationPatchPanelPortCount ||
+                          selectedDestinationPatchPanelPortCount < 1
+                        }
+                      >
+                        <SelectTrigger id="destination_patch_panel_port">
+                          <SelectValue placeholder="Select destination patch panel port" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {selectedDestinationPatchPanelPortCount && selectedDestinationPatchPanelPortCount > 0
+                            ? Array.from({ length: selectedDestinationPatchPanelPortCount }, (_, index) => index + 1).map((port) => (
+                                <SelectItem key={`dst-pp-port-${port}`} value={String(port)}>
+                                  Port {port}
+                                </SelectItem>
+                              ))
+                            : null}
+                        </SelectContent>
+                      </Select>
+                      {selectedDestinationPatchPanel && (!selectedDestinationPatchPanelPortCount || selectedDestinationPatchPanelPortCount < 1) && (
+                        <p className="text-xs text-muted-foreground">Selected destination patch panel has no configured port count.</p>
+                      )}
+                      {errors.destination_patch_panel_port && (
+                        <p className="text-sm text-destructive">{errors.destination_patch_panel_port.message}</p>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

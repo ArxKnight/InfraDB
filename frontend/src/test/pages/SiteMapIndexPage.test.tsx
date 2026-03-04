@@ -114,6 +114,43 @@ describe('SiteMapIndexPage', () => {
         ],
       },
     });
+
+    (apiClient as any).downloadSiteCableReport = vi.fn().mockResolvedValue({
+      blob: new Blob(['test'], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }),
+      filename: 'TEST_site_overview_report.docx',
+    });
+
+    (apiClient as any).getSiteSids = vi.fn().mockResolvedValue({
+      success: true,
+      data: {
+        sids: [
+          {
+            id: 1,
+            sid_number: '1',
+            hostname: 'WAL-SW1',
+            status: 'Active',
+            location_path: 'WAL/FL0/S1/ROWA/R1',
+            primary_ip: '10.0.0.1',
+          },
+        ],
+        pagination: { has_more: false },
+      },
+    });
+
+    (apiClient as any).downloadSiteSidIndexReport = vi.fn().mockResolvedValue({
+      blob: new Blob(['sid'], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }),
+      filename: 'TEST_sid_index_report.docx',
+    });
+
+    (apiClient as any).downloadSiteCableTraceReport = vi.fn().mockResolvedValue({
+      blob: new Blob(['trace'], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }),
+      filename: 'TEST_cable_trace_report.docx',
+    });
+
+    (apiClient as any).downloadSiteVisualRackReport = vi.fn().mockResolvedValue({
+      blob: new Blob(['rack'], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }),
+      filename: 'TEST_visual_rack_report.docx',
+    });
   });
 
   it('renders MapIndex tabs and rack empty-state message', async () => {
@@ -126,7 +163,43 @@ describe('SiteMapIndexPage', () => {
     expect(screen.getByText('MAPIndex')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Rack View' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Cable Trace' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Reports' })).toBeInTheDocument();
     expect(screen.getByText('Select rack locations to view rack/s visually')).toBeInTheDocument();
+  });
+
+  it('loads reports tab actions', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('tab', { name: 'Reports' }));
+
+    expect(screen.getByText('Site Overview Report')).toBeInTheDocument();
+    expect(screen.getByText('SID Index Report')).toBeInTheDocument();
+    expect(screen.getByText('Cable Trace Report')).toBeInTheDocument();
+    expect(screen.getByText('Visual Rack Report')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Download Site Overview Report (.docx)' }));
+    await waitFor(() => {
+      expect((apiClient as any).downloadSiteCableReport).toHaveBeenCalledWith(1);
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Download SID Index Report (.docx)' }));
+    await waitFor(() => {
+      expect((apiClient as any).downloadSiteSidIndexReport).toHaveBeenCalledWith(1);
+    });
+
+    await user.type(screen.getByPlaceholderText('Enter one or more refs (comma or new line): #0001, #0002'), '#0001, #0002');
+    await user.click(screen.getByRole('button', { name: 'Download Trace Report (.docx)' }));
+    await waitFor(() => {
+      expect((apiClient as any).downloadSiteCableTraceReport).toHaveBeenCalled();
+    });
+
+    const checkboxes = await screen.findAllByRole('checkbox');
+    await user.click(checkboxes[0]!);
+    await user.click(screen.getByRole('button', { name: 'Download Visual Rack Report (.docx)' }));
+    await waitFor(() => {
+      expect((apiClient as any).downloadSiteVisualRackReport).toHaveBeenCalled();
+    });
   });
 
   it('loads selected rack elevations and shows occupants', async () => {

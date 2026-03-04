@@ -152,6 +152,23 @@ const SiteSidIndexPage: React.FC = () => {
     return [label, floor, suite, row, rack].filter((p) => p !== '').join('/');
   };
 
+  const sortedSids = React.useMemo(() => {
+    const list = Array.isArray(sids) ? [...sids] : [];
+    return list.sort((a, b) => {
+      const aRaw = String(a?.sid_number ?? '').trim();
+      const bRaw = String(b?.sid_number ?? '').trim();
+
+      const aNum = /^\d+$/.test(aRaw) ? Number(aRaw) : null;
+      const bNum = /^\d+$/.test(bRaw) ? Number(bRaw) : null;
+
+      if (aNum != null && bNum != null && aNum !== bNum) {
+        return aNum - bNum;
+      }
+
+      return aRaw.localeCompare(bRaw, undefined, { numeric: true, sensitivity: 'base' });
+    });
+  }, [sids]);
+
 
   if (loading) {
     return (
@@ -289,7 +306,7 @@ const SiteSidIndexPage: React.FC = () => {
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Loading SIDs…
               </div>
-            ) : sids.length === 0 ? (
+            ) : sortedSids.length === 0 ? (
               <div className="py-6 text-sm text-muted-foreground">No SIDs found.</div>
             ) : (
               <Table className="lg:[&_th]:whitespace-nowrap lg:[&_td]:whitespace-nowrap">
@@ -308,7 +325,7 @@ const SiteSidIndexPage: React.FC = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sids.map((sid) => (
+                  {sortedSids.map((sid) => (
                     <TableRow
                       key={sid.id}
                       className="cursor-pointer"
