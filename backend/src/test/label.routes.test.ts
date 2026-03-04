@@ -54,6 +54,7 @@ describe('Label Routes', () => {
       suite: 'A',
       row: 'R1',
       rack: '01',
+      rack_size_u: 42,
       label: 'SRC',
     });
 
@@ -63,6 +64,7 @@ describe('Label Routes', () => {
       suite: 'A',
       row: 'R1',
       rack: '02',
+      rack_size_u: 42,
       label: 'DST',
     });
 
@@ -166,6 +168,7 @@ describe('Label Routes', () => {
         suite: 'A',
         row: 'R1',
         rack: '03',
+        rack_size_u: 42,
         label: 'IVY',
       });
 
@@ -175,6 +178,7 @@ describe('Label Routes', () => {
         suite: 'B',
         row: 'R2',
         rack: '04',
+        rack_size_u: 42,
         label: 'OAK',
       });
 
@@ -184,6 +188,7 @@ describe('Label Routes', () => {
         suite: 'B',
         row: 'R2',
         rack: '05',
+        rack_size_u: 42,
         label: 'PINE',
       });
 
@@ -236,6 +241,7 @@ describe('Label Routes', () => {
         suite: 'Z',
         row: 'R9',
         rack: '99',
+        rack_size_u: 42,
         label: 'OTHER',
       });
 
@@ -274,6 +280,7 @@ describe('Label Routes', () => {
         suite: 'Y',
         row: 'R8',
         rack: '88',
+        rack_size_u: 42,
         label: 'OTHER',
       });
 
@@ -312,6 +319,7 @@ describe('Label Routes', () => {
         suite: 'A',
         row: 'R1',
         rack: '99',
+        rack_size_u: 42,
         label: 'SRC',
       });
 
@@ -321,6 +329,7 @@ describe('Label Routes', () => {
         suite: 'A',
         row: 'R1',
         rack: '01',
+        rack_size_u: 42,
         label: 'DST',
       });
 
@@ -330,6 +339,7 @@ describe('Label Routes', () => {
         suite: 'A',
         row: 'R1',
         rack: '01',
+        rack_size_u: 42,
         label: 'DST',
       });
 
@@ -372,6 +382,7 @@ describe('Label Routes', () => {
         suite: 'A',
         row: 'R1',
         rack: '06',
+        rack_size_u: 42,
         label: 'IVY',
       });
 
@@ -381,6 +392,7 @@ describe('Label Routes', () => {
         suite: 'B',
         row: 'R2',
         rack: '07',
+        rack_size_u: 42,
         label: 'OAK',
       });
 
@@ -501,6 +513,7 @@ describe('Label Routes', () => {
         suite: 'B',
         row: 'R2',
         rack: '03',
+        rack_size_u: 42,
         label: 'NEW',
       });
 

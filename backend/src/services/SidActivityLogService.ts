@@ -2,6 +2,7 @@ import connection from '../database/connection.js';
 
 export type SidActivityAction =
   | 'SID_VIEWED'
+  | 'SID_OPENED'
   | 'SID_UPDATED'
   | 'SID_DELETED'
   | 'SID_NOTE_ADDED'

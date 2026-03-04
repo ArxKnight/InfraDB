@@ -65,7 +65,13 @@ const CableTraceView: React.FC<CableTraceViewProps> = ({ siteId, cableRef, hops 
     const lines: string[] = [`Cable Trace Ref ${cableRef}`];
     for (let i = 0; i < hops.length; i += 1) {
       lines.push('');
+      if (i === 0) {
+        lines.push('Source');
+      }
       lines.push(hopText(hops[i]!));
+      if (i === hops.length - 1) {
+        lines.push('Destination');
+      }
       if (i < hops.length - 1) lines.push('|');
     }
     return lines.join('\n');
@@ -99,9 +105,19 @@ const CableTraceView: React.FC<CableTraceViewProps> = ({ siteId, cableRef, hops 
           const displayHostname = String(hop.hostname ?? '').trim() || 'Unknown';
           const displaySid = hop.sidId ? String(hop.sidId) : 'Unknown';
           const displayRackU = String(hop.rackUText ?? '').trim() || 'Unknown';
+          const isFirst = idx === 0;
+          const isLast = idx === hops.length - 1;
 
           return (
             <div key={`${hop.sidId ?? 'unknown'}-${idx}`} className="relative">
+              {isFirst && (
+                <div className="mb-2 flex justify-center">
+                  <span className="rounded-md border bg-muted px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-foreground">
+                    Source
+                  </span>
+                </div>
+              )}
+
               <div className="rounded-md border p-3 text-center">
                 <div className="font-medium text-sm">{displayHostname} (SID: {displaySid})</div>
                 <div className="text-sm text-muted-foreground">
@@ -110,6 +126,14 @@ const CableTraceView: React.FC<CableTraceViewProps> = ({ siteId, cableRef, hops 
                 <div className="text-sm">{hop.rackLocation || 'Unknown location'}</div>
                 <div className="text-sm text-muted-foreground">Connected Port: {connected || 'Unknown'}</div>
               </div>
+
+              {isLast && (
+                <div className="mt-2 flex justify-center">
+                  <span className="rounded-md border bg-muted px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-foreground">
+                    Destination
+                  </span>
+                </div>
+              )}
 
               {idx < hops.length - 1 && (
                 <div className="flex justify-center py-2">

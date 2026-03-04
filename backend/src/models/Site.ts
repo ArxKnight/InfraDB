@@ -58,7 +58,7 @@ export class SiteModel {
 
       // Seed default SID Types so the SID Index has useful options immediately.
       // These can be removed later by a Site Admin or Global Admin.
-      const defaultSidTypeNames = ['Server', 'Switch', 'Patch Panel'] as const;
+      const defaultSidTypeNames = ['Server', 'Switch', 'Access Point', 'Patch Panel'] as const;
       for (const sidTypeName of defaultSidTypeNames) {
         await this.adapter.execute(
           `INSERT INTO sid_types (site_id, name, description)

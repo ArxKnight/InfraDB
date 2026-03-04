@@ -5,9 +5,14 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import SiteMapIndexPage from '../../pages/SiteMapIndexPage';
 import { apiClient } from '../../lib/api';
 
+const routerFuture = {
+  v7_startTransition: true,
+  v7_relativeSplatPath: true,
+};
+
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={['/sites/1/mapindex']}>
+    <MemoryRouter initialEntries={['/sites/1/mapindex']} future={routerFuture}>
       <Routes>
         <Route path="/sites/:siteId/mapindex" element={<SiteMapIndexPage />} />
       </Routes>
@@ -164,6 +169,8 @@ describe('SiteMapIndexPage', () => {
     });
 
     expect(screen.getByText('Cable Trace Ref #0001')).toBeInTheDocument();
+    expect(screen.getByText('Source')).toBeInTheDocument();
+    expect(screen.getByText('Destination')).toBeInTheDocument();
     expect(screen.getByText(/WAL-SW1/)).toBeInTheDocument();
     expect(screen.getByText(/WAL-PP1/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open Cable Ref#' })).toBeInTheDocument();

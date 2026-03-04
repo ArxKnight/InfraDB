@@ -166,6 +166,40 @@ const SiteLocationsDialog: React.FC<SiteLocationsDialogProps> = ({ open, onOpenC
     };
   };
 
+  const buildOriginalPayload = (loc: SiteLocation) => {
+    const tt = (loc.template_type === 'DOMESTIC' ? 'DOMESTIC' : 'DATACENTRE') as 'DATACENTRE' | 'DOMESTIC';
+    const labelV = String(loc.label ?? '').trim();
+    const floorV = String(loc.floor ?? '').trim();
+    const suiteV = String(loc.suite ?? '').trim();
+    const rowV = String(loc.row ?? '').trim();
+    const rackV = String(loc.rack ?? '').trim();
+    const areaV = String(loc.area ?? '').trim();
+
+    return {
+      template_type: tt,
+      label: labelV,
+      floor: floorV,
+      ...(tt === 'DOMESTIC'
+        ? {
+            area: areaV,
+            suite: '',
+            row: '',
+            rack: '',
+          }
+        : {
+            suite: suiteV,
+            row: rowV,
+            rack: rackV,
+            area: '',
+          }),
+    };
+  };
+
+  const hasEditChanges = useMemo(() => {
+    if (!editing) return true;
+    return JSON.stringify(buildPayload()) !== JSON.stringify(buildOriginalPayload(editing));
+  }, [editing, templateType, label, floor, suite, row, rack, area]);
+
   const handleCreateOrUpdate = async () => {
     const floorV = floor.trim();
     const suiteV = suite.trim();
@@ -195,6 +229,10 @@ const SiteLocationsDialog: React.FC<SiteLocationsDialogProps> = ({ open, onOpenC
       setError(null);
 
       if (editing?.id) {
+        if (!hasEditChanges) {
+          return;
+        }
+
         const usageResp = await apiClient.getSiteLocationUsage(siteId, editing.id);
         if (!usageResp.success || !usageResp.data) throw new Error(usageResp.error || 'Failed to load location usage');
 
@@ -463,8 +501,8 @@ const SiteLocationsDialog: React.FC<SiteLocationsDialogProps> = ({ open, onOpenC
                   Cancel
                 </Button>
               )}
-              <Button onClick={handleCreateOrUpdate} disabled={working}>
-                {working ? <Loader2 className="h-4 w-4 animate-spin" /> : editing ? 'Save Changes' : 'Add Location'}
+              <Button onClick={handleCreateOrUpdate} disabled={working || (!!editing && !hasEditChanges)}>
+                {working ? <Loader2 className="h-4 w-4 animate-spin" /> : editing ? (hasEditChanges ? 'Save Changes' : 'No New Changes') : 'Add Location'}
               </Button>
             </div>
           </div>

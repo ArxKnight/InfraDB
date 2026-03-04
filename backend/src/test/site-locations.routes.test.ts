@@ -48,13 +48,13 @@ describe('Site Location Routes', () => {
     await request(app)
       .post(`/api/sites/${site.id}/locations`)
       .set('Authorization', `Bearer ${authToken}`)
-      .send({ floor: '1', suite: '1', row: 'A', rack: '1' })
+      .send({ floor: '1', suite: '1', row: 'A', rack: '1', rack_size_u: 42 })
       .expect(201);
 
     await request(app)
       .post(`/api/sites/${site.id}/locations`)
       .set('Authorization', `Bearer ${authToken}`)
-      .send({ floor: '1', suite: '1', row: 'A', rack: '1', label: 'LOFT' })
+      .send({ floor: '1', suite: '1', row: 'A', rack: '1', rack_size_u: 42, label: 'LOFT' })
       .expect(201);
   });
 
@@ -64,13 +64,13 @@ describe('Site Location Routes', () => {
     await request(app)
       .post(`/api/sites/${site.id}/locations`)
       .set('Authorization', `Bearer ${authToken}`)
-      .send({ floor: '1', suite: '1', row: 'A', rack: '1', label: 'LOFT' })
+      .send({ floor: '1', suite: '1', row: 'A', rack: '1', rack_size_u: 42, label: 'LOFT' })
       .expect(201);
 
     const response = await request(app)
       .post(`/api/sites/${site.id}/locations`)
       .set('Authorization', `Bearer ${authToken}`)
-      .send({ floor: '1', suite: '1', row: 'A', rack: '1', label: 'LOFT' })
+      .send({ floor: '1', suite: '1', row: 'A', rack: '1', rack_size_u: 42, label: 'LOFT' })
       .expect(409);
 
     expect(response.body.success).toBe(false);
@@ -84,13 +84,13 @@ describe('Site Location Routes', () => {
     await request(app)
       .post(`/api/sites/${site.id}/locations`)
       .set('Authorization', `Bearer ${authToken}`)
-      .send({ floor: '1', suite: '1', row: 'A', rack: '1' })
+      .send({ floor: '1', suite: '1', row: 'A', rack: '1', rack_size_u: 42 })
       .expect(201);
 
     const response = await request(app)
       .post(`/api/sites/${site.id}/locations`)
       .set('Authorization', `Bearer ${authToken}`)
-      .send({ floor: '1', suite: '1', row: 'A', rack: '1' })
+      .send({ floor: '1', suite: '1', row: 'A', rack: '1', rack_size_u: 42 })
       .expect(409);
 
     expect(response.body.success).toBe(false);
@@ -99,7 +99,7 @@ describe('Site Location Routes', () => {
 
   it('deletes an unused location with default behavior', async () => {
     const site = await siteModel.create({ name: 'Test Site', code: 'TS', created_by: testUser.id });
-    const loc = await siteLocationModel.create({ site_id: site.id, floor: '1', suite: 'A', row: 'R1', rack: '1', label: 'SRC' });
+    const loc = await siteLocationModel.create({ site_id: site.id, floor: '1', suite: 'A', row: 'R1', rack: '1', rack_size_u: 42, label: 'SRC' });
 
     const response = await request(app)
       .delete(`/api/sites/${site.id}/locations/${loc.id}`)
@@ -114,8 +114,8 @@ describe('Site Location Routes', () => {
 
   it('blocks deleting a location that is in use (409) unless a strategy is provided', async () => {
     const site = await siteModel.create({ name: 'Test Site', code: 'TS', created_by: testUser.id });
-    const src = await siteLocationModel.create({ site_id: site.id, floor: '1', suite: 'A', row: 'R1', rack: '1', label: 'SRC' });
-    const dst = await siteLocationModel.create({ site_id: site.id, floor: '2', suite: 'B', row: 'R2', rack: '2', label: 'DST' });
+    const src = await siteLocationModel.create({ site_id: site.id, floor: '1', suite: 'A', row: 'R1', rack: '1', rack_size_u: 42, label: 'SRC' });
+    const dst = await siteLocationModel.create({ site_id: site.id, floor: '2', suite: 'B', row: 'R2', rack: '2', rack_size_u: 42, label: 'DST' });
 
     const cableType = await cableTypeModel.create({ site_id: site.id, name: 'CAT6' });
 
@@ -141,8 +141,8 @@ describe('Site Location Routes', () => {
 
   it('counts destination references when blocking delete (409)', async () => {
     const site = await siteModel.create({ name: 'Test Site', code: 'TS', created_by: testUser.id });
-    const src = await siteLocationModel.create({ site_id: site.id, floor: '1', suite: 'A', row: 'R1', rack: '1', label: 'SRC' });
-    const dst = await siteLocationModel.create({ site_id: site.id, floor: '2', suite: 'B', row: 'R2', rack: '2', label: 'DST' });
+    const src = await siteLocationModel.create({ site_id: site.id, floor: '1', suite: 'A', row: 'R1', rack: '1', rack_size_u: 42, label: 'SRC' });
+    const dst = await siteLocationModel.create({ site_id: site.id, floor: '2', suite: 'B', row: 'R2', rack: '2', rack_size_u: 42, label: 'DST' });
 
     const cableType = await cableTypeModel.create({ site_id: site.id, name: 'CAT6' });
 
@@ -168,8 +168,8 @@ describe('Site Location Routes', () => {
 
   it('reassigns labels then deletes the location when strategy=reassign', async () => {
     const site = await siteModel.create({ name: 'Test Site', code: 'TS', created_by: testUser.id });
-    const src = await siteLocationModel.create({ site_id: site.id, floor: '1', suite: 'A', row: 'R1', rack: '1', label: 'SRC' });
-    const dst = await siteLocationModel.create({ site_id: site.id, floor: '2', suite: 'B', row: 'R2', rack: '2', label: 'DST' });
+    const src = await siteLocationModel.create({ site_id: site.id, floor: '1', suite: 'A', row: 'R1', rack: '1', rack_size_u: 42, label: 'SRC' });
+    const dst = await siteLocationModel.create({ site_id: site.id, floor: '2', suite: 'B', row: 'R2', rack: '2', rack_size_u: 42, label: 'DST' });
 
     const cableType = await cableTypeModel.create({ site_id: site.id, name: 'CAT6' });
 
@@ -199,8 +199,8 @@ describe('Site Location Routes', () => {
 
   it('cascades label deletion then deletes the location when strategy=cascade', async () => {
     const site = await siteModel.create({ name: 'Test Site', code: 'TS', created_by: testUser.id });
-    const src = await siteLocationModel.create({ site_id: site.id, floor: '1', suite: 'A', row: 'R1', rack: '1', label: 'SRC' });
-    const dst = await siteLocationModel.create({ site_id: site.id, floor: '2', suite: 'B', row: 'R2', rack: '2', label: 'DST' });
+    const src = await siteLocationModel.create({ site_id: site.id, floor: '1', suite: 'A', row: 'R1', rack: '1', rack_size_u: 42, label: 'SRC' });
+    const dst = await siteLocationModel.create({ site_id: site.id, floor: '2', suite: 'B', row: 'R2', rack: '2', rack_size_u: 42, label: 'DST' });
 
     const cableType = await cableTypeModel.create({ site_id: site.id, name: 'CAT6' });
 

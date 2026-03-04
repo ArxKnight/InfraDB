@@ -62,6 +62,22 @@ function getMySqlTestAdminConfig(base: ReturnType<typeof getMySqlTestConfig>) {
 async function clearAllTables(adapter: DatabaseAdapter): Promise<void> {
   // Keep the migrations table so we don't re-run migrations every time.
   const tables = [
+    'sid_connection_cables',
+    'sid_connections',
+    'sid_nics',
+    'sid_passwords',
+    'sid_notes',
+    'sid_activity_log',
+    'sids',
+    'sid_device_models',
+    'sid_cpu_models',
+    'sid_types',
+    'sid_statuses',
+    'sid_platforms',
+    'sid_password_types',
+    'sid_nic_types',
+    'sid_nic_speeds',
+    'site_vlans',
     'invitation_sites',
     'invitations',
     'password_reset_tokens',

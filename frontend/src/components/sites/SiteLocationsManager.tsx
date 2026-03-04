@@ -188,6 +188,43 @@ const SiteLocationsManager: React.FC<SiteLocationsManagerProps> = ({ siteId, sit
     };
   };
 
+  const buildOriginalPayload = (loc: SiteLocation) => {
+    const tt = (loc.template_type === 'DOMESTIC' ? 'DOMESTIC' : 'DATACENTRE') as 'DATACENTRE' | 'DOMESTIC';
+    const labelV = String(loc.label ?? '').trim();
+    const floorV = String(loc.floor ?? '').trim();
+    const suiteV = String(loc.suite ?? '').trim();
+    const rowV = String(loc.row ?? '').trim();
+    const rackV = String(loc.rack ?? '').trim();
+    const areaV = String(loc.area ?? '').trim();
+    const rackSizeUValue = loc.rack_size_u == null ? null : Number(loc.rack_size_u);
+
+    return {
+      template_type: tt,
+      label: labelV,
+      floor: floorV,
+      ...(tt === 'DOMESTIC'
+        ? {
+            area: areaV,
+            suite: '',
+            row: '',
+            rack: '',
+            rack_size_u: rackSizeUValue,
+          }
+        : {
+            suite: suiteV,
+            row: rowV,
+            rack: rackV,
+            rack_size_u: rackSizeUValue,
+            area: '',
+          }),
+    };
+  };
+
+  const hasEditChanges = useMemo(() => {
+    if (!editing) return true;
+    return JSON.stringify(buildPayload()) !== JSON.stringify(buildOriginalPayload(editing));
+  }, [editing, templateType, label, floor, suite, row, rack, rackSizeU, area]);
+
   const handleCreateOrUpdate = async () => {
     const floorV = floor.trim();
     const suiteV = suite.trim();
@@ -228,6 +265,10 @@ const SiteLocationsManager: React.FC<SiteLocationsManagerProps> = ({ siteId, sit
       setError(null);
 
       if (editing?.id) {
+        if (!hasEditChanges) {
+          return;
+        }
+
         const usageResp = await apiClient.getSiteLocationUsage(siteId, editing.id);
         if (!usageResp.success || !usageResp.data) throw new Error(usageResp.error || 'Failed to load location usage');
 
@@ -514,8 +555,8 @@ const SiteLocationsManager: React.FC<SiteLocationsManagerProps> = ({ siteId, sit
 
             <DialogFooter>
               <Button variant="outline" onClick={cancelEdit} disabled={working}>Cancel</Button>
-              <Button onClick={handleCreateOrUpdate} disabled={working}>
-                {working ? <Loader2 className="h-4 w-4 animate-spin" /> : editing ? 'Save Changes' : 'Add Location'}
+              <Button onClick={handleCreateOrUpdate} disabled={working || (!!editing && !hasEditChanges)}>
+                {working ? <Loader2 className="h-4 w-4 animate-spin" /> : editing ? (hasEditChanges ? 'Save Changes' : 'No New Changes') : 'Add Location'}
               </Button>
             </DialogFooter>
           </DialogContent>

@@ -52,6 +52,17 @@ const SiteCableTypesManager: React.FC<SiteCableTypesManagerProps> = ({ siteId, s
     return [...cableTypes].sort((a, b) => a.name.localeCompare(b.name) || (a.id ?? 0) - (b.id ?? 0));
   }, [cableTypes]);
 
+  const hasEditChanges = useMemo(() => {
+    if (!editing) return true;
+
+    const currentName = name.trim();
+    const currentDescription = description.trim() || null;
+    const originalName = String(editing.name ?? '').trim();
+    const originalDescription = String(editing.description ?? '').trim() || null;
+
+    return currentName !== originalName || currentDescription !== originalDescription;
+  }, [description, editing, name]);
+
   const resetForm = () => {
     setName('');
     setDescription('');
@@ -119,6 +130,10 @@ const SiteCableTypesManager: React.FC<SiteCableTypesManagerProps> = ({ siteId, s
       setError(null);
 
       if (editing?.id) {
+        if (!hasEditChanges) {
+          return;
+        }
+
         const payload = {
           name: trimmedName,
           description: description.trim() ? description.trim() : null,
@@ -324,8 +339,8 @@ const SiteCableTypesManager: React.FC<SiteCableTypesManagerProps> = ({ siteId, s
             <Button variant="outline" onClick={closeForm} disabled={working}>
               Cancel
             </Button>
-            <Button onClick={() => void handleSubmit()} disabled={working}>
-              {working ? <Loader2 className="h-4 w-4 animate-spin" /> : editing ? 'Save Changes' : 'Add'}
+            <Button onClick={() => void handleSubmit()} disabled={working || (!!editing && !hasEditChanges)}>
+              {working ? <Loader2 className="h-4 w-4 animate-spin" /> : editing ? (hasEditChanges ? 'Save Changes' : 'No New Changes') : 'Add'}
             </Button>
           </DialogFooter>
         </DialogContent>

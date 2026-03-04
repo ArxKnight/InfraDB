@@ -8,6 +8,7 @@ import {
 import { ArrowLeft, Loader2, Pencil, Pin, PinOff, Plus, Save, Trash2 } from 'lucide-react';
 
 import { ApiError, apiClient } from '../lib/api';
+import { sortNicTabItems } from '@/lib/nicTabs';
 import { useAuth } from '../contexts/AuthContext';
 import usePermissions from '../hooks/usePermissions';
 import { Button } from '../components/ui/button';
@@ -186,6 +187,70 @@ function formatHistoryFieldLabel(field: unknown): string {
   });
 }
 
+function normalizeExtraIpsForFingerprint(values: string[]): string[] {
+  return Array.from(
+    new Set(
+      (Array.isArray(values) ? values : [])
+        .map((value) => value.trim())
+        .filter((value) => value !== '')
+    )
+  ).slice(0, 200);
+}
+
+function buildSidEditFingerprint(record: SidRecord | null, nicList: any[], ipList: string[], defaultCardName: string): string {
+  if (!record) return '';
+
+  const payload: Record<string, any> = {
+    sid_type_id: record.sid_type_id ?? null,
+    device_model_id: record.device_model_id ?? null,
+    cpu_model_id: record.cpu_model_id ?? null,
+    hostname: record.hostname ?? null,
+    serial_number: record.serial_number ?? null,
+    status: record.status ?? null,
+    cpu_count: record.cpu_count ?? null,
+    cpu_cores: record.cpu_cores ?? null,
+    cpu_threads: record.cpu_threads ?? null,
+    ram_gb: record.ram_gb ?? null,
+    platform_id: record.platform_id ?? null,
+    os_name: record.os_name ?? null,
+    os_version: record.os_version ?? null,
+    mgmt_ip: record.mgmt_ip ?? null,
+    mgmt_mac: record.mgmt_mac ?? null,
+    primary_ip: record.primary_ip ?? null,
+    subnet_ip: record.subnet_ip ?? null,
+    gateway_ip: record.gateway_ip ?? null,
+    switch_port_count: record.switch_port_count ?? null,
+    location_id: record.location_id ?? null,
+    pdu_power: record.pdu_power ?? null,
+    rack_u: record.rack_u ?? null,
+  };
+
+  const status = String(record.status ?? '').trim();
+  if (!status) {
+    delete payload.status;
+  } else {
+    payload.status = status;
+  }
+
+  const normalizedNics = (Array.isArray(nicList) ? nicList : []).map((n) => ({
+    card_name: (n?.card_name ?? null) === defaultCardName ? null : (n?.card_name ?? null),
+    name: n?.name ?? null,
+    mac_address: n?.mac_address ?? null,
+    ip_address: n?.ip_address ?? null,
+    site_vlan_id: n?.site_vlan_id ?? null,
+    nic_type_id: n?.nic_type_id ?? null,
+    nic_speed_id: n?.nic_speed_id ?? null,
+    switch_sid_id: n?.switch_sid_id ?? null,
+    switch_port: n?.switch_port ?? null,
+  }));
+
+  return JSON.stringify({
+    payload,
+    nics: normalizedNics,
+    extra_ips: normalizeExtraIpsForFingerprint(ipList),
+  });
+}
+
 const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -241,6 +306,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
   const [pendingExtraIpRemoval, setPendingExtraIpRemoval] = React.useState<PendingExtraIpRemoval>(null);
   const [saveLoading, setSaveLoading] = React.useState(false);
   const [saveError, setSaveError] = React.useState<string | null>(null);
+  const [loadedEditFingerprint, setLoadedEditFingerprint] = React.useState<string>('');
 
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleteLoading, setDeleteLoading] = React.useState(false);
@@ -276,6 +342,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
   const [editPasswordOpen, setEditPasswordOpen] = React.useState(false);
   const [editPasswordTypeId, setEditPasswordTypeId] = React.useState<number | null>(null);
   const [editPasswordTypeName, setEditPasswordTypeName] = React.useState('');
+  const [editPasswordOriginalUsername, setEditPasswordOriginalUsername] = React.useState('');
   const [editPasswordUsername, setEditPasswordUsername] = React.useState('');
   const [editPasswordValue, setEditPasswordValue] = React.useState('');
 
@@ -463,11 +530,17 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
         setNotes([]);
         setNics([]);
         setExtraIps([]);
+        setLoadedEditFingerprint('');
       } else {
-        setSid(sidResp.data?.sid ?? null);
+        const loadedSid = sidResp.data?.sid ?? null;
+        const loadedNics = sidResp.data?.nics ?? [];
+        const loadedExtraIps = ipResp.success ? (ipResp.data?.ip_addresses ?? []) : [];
+
+        setSid(loadedSid);
         setNotes(sortNotesPinnedFirst(sidResp.data?.notes ?? []));
-        setNics(sidResp.data?.nics ?? []);
-        setExtraIps(ipResp.success ? (ipResp.data?.ip_addresses ?? []) : []);
+        setNics(loadedNics);
+        setExtraIps(loadedExtraIps);
+        setLoadedEditFingerprint(buildSidEditFingerprint(loadedSid, loadedNics, loadedExtraIps, DEFAULT_NETWORK_CARD_NAME));
         shouldLogViewRef.current = false;
       }
 
@@ -598,7 +671,8 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
       if (displayCardName !== targetCard) continue;
       items.push({ index: i, nic, displayCardName });
     }
-    return items;
+
+    return sortNicTabItems(items);
   }, [nics, networkingCardTab]);
 
   React.useEffect(() => {
@@ -625,16 +699,17 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
   }, [siteId, sidId]);
 
   const normalizeExtraIps = React.useCallback((values: string[]): string[] => {
-    return Array.from(
-      new Set(
-        (Array.isArray(values) ? values : [])
-          .map((value) => value.trim())
-          .filter((value) => value !== '')
-      )
-    ).slice(0, 200);
+    return normalizeExtraIpsForFingerprint(values);
   }, []);
 
   const extraIpCount = React.useMemo(() => normalizeExtraIps(extraIps).length, [extraIps, normalizeExtraIps]);
+
+  const hasEditChanges = React.useMemo(() => {
+    if (isCreate) return false;
+    if (!sid) return false;
+    const currentFingerprint = buildSidEditFingerprint(sid, nics, extraIps, DEFAULT_NETWORK_CARD_NAME);
+    return currentFingerprint !== loadedEditFingerprint;
+  }, [isCreate, sid, nics, extraIps, loadedEditFingerprint, DEFAULT_NETWORK_CARD_NAME]);
 
   const loadPassword = React.useCallback(async () => {
     if (isCreate) return;
@@ -808,10 +883,21 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
     setPasswordError(null);
     setEditPasswordTypeId(typeId);
     setEditPasswordTypeName(String(row?.password_type_name ?? 'Password'));
-    setEditPasswordUsername(String(row?.username ?? ''));
+    const originalUsername = String(row?.username ?? '');
+    setEditPasswordOriginalUsername(originalUsername);
+    setEditPasswordUsername(originalUsername);
     setEditPasswordValue('');
     setEditPasswordOpen(true);
   };
+
+  const hasEditedPasswordChanges = React.useMemo(() => {
+    if (!editPasswordOpen) return false;
+    const currentUsername = editPasswordUsername.trim();
+    const originalUsername = editPasswordOriginalUsername.trim();
+    const hasUsernameChange = currentUsername !== originalUsername;
+    const hasPasswordChange = editPasswordValue.trim() !== '';
+    return hasUsernameChange || hasPasswordChange;
+  }, [editPasswordOpen, editPasswordOriginalUsername, editPasswordUsername, editPasswordValue]);
 
   const saveEditedTypedPassword = async () => {
     if (isCreate) return;
@@ -832,6 +918,10 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
 
     const usernameTrimmed = editPasswordUsername.trim();
     const nextUsername = usernameTrimmed === '' ? null : usernameTrimmed;
+
+    if (!hasEditedPasswordChanges) {
+      return;
+    }
 
     try {
       setPasswordSaving(true);
@@ -1379,6 +1469,9 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                 setMissingRequiredOpen(true);
                 return;
               }
+              if (!isCreate && !hasEditChanges) {
+                return;
+              }
               void saveSid();
             }}
             disabled={
@@ -1386,7 +1479,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                 ? !canModify
                   || saveLoading
                   || !createPrereqsReady
-                : !canModify || saveLoading)
+                : !canModify || saveLoading || !hasEditChanges)
             }
           >
             {saveLoading ? (
@@ -1397,7 +1490,7 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
             ) : (
               <>
                 <Save className="mr-2 h-4 w-4" />
-                {isCreate ? 'Create SID' : 'Save Edits'}
+                {isCreate ? 'Create SID' : (hasEditChanges ? 'Save Edits' : 'No New Changes')}
               </>
             )}
           </Button>
@@ -1932,14 +2025,14 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                                 >
                                   Cancel
                                 </Button>
-                                <Button onClick={saveEditedTypedPassword} disabled={passwordSaving}>
+                                <Button onClick={saveEditedTypedPassword} disabled={passwordSaving || !hasEditedPasswordChanges}>
                                   {passwordSaving ? (
                                     <>
                                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                       Saving…
                                     </>
                                   ) : (
-                                    'Save Changes'
+                                    hasEditedPasswordChanges ? 'Save Changes' : 'No New Changes'
                                   )}
                                 </Button>
                               </DialogFooter>
@@ -2293,14 +2386,15 @@ const SidDetailPage: React.FC<SidDetailPageProps> = ({ mode = 'view' }) => {
                                   setNetworkingNicTab(v);
                                 }}
                               >
-                                <TabsList className="flex flex-wrap justify-start">
+                                <TabsList className="grid h-auto w-full grid-cols-10 gap-1 justify-start">
                                   {cardNics.map((item, idx) => (
-                                    <TabsTrigger key={`${item.index}-${idx}`} value={String(idx)}>
+                                    <TabsTrigger key={`${item.index}-${idx}`} value={String(idx)} className="w-full">
                                       {String(item.nic?.name ?? `NIC${idx + 1}`)}
                                     </TabsTrigger>
                                   ))}
                                   <TabsTrigger
                                     value="__newnic"
+                                    className="w-full"
                                     onMouseDown={(e) => e.preventDefault()}
                                     onClick={(e) => {
                                       e.preventDefault();

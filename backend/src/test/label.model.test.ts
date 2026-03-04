@@ -47,6 +47,7 @@ describe('Label Model', () => {
       suite: 'A',
       row: 'R1',
       rack: '01',
+      rack_size_u: 42,
       label: 'SRC',
     });
     destinationLoc = await siteLocationModel.create({
@@ -55,6 +56,7 @@ describe('Label Model', () => {
       suite: 'A',
       row: 'R1',
       rack: '02',
+      rack_size_u: 42,
       label: 'DST',
     });
 
@@ -158,6 +160,7 @@ describe('Label Model', () => {
         suite: 'Z',
         row: 'R9',
         rack: '99',
+        rack_size_u: 42,
         label: 'OTHER',
       });
       const otherCableType = await cableTypeModel.create({
@@ -256,6 +259,7 @@ describe('Label Model', () => {
         suite: 'B',
         row: 'R2',
         rack: '03',
+        rack_size_u: 42,
         label: 'NEW',
       });
 

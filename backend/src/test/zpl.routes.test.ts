@@ -54,6 +54,7 @@ describe('ZPL Routes', () => {
       suite: 'A',
       row: 'R1',
       rack: '01',
+      rack_size_u: 42,
       label: 'Loft',
     });
     const locB = await siteLocationModel.create({
@@ -62,6 +63,7 @@ describe('ZPL Routes', () => {
       suite: 'A',
       row: 'R1',
       rack: '02',
+      rack_size_u: 42,
       label: 'Garage',
     });
 
@@ -145,6 +147,7 @@ describe('ZPL Routes', () => {
         suite: 'A',
         row: 'R1',
         rack: '03',
+        rack_size_u: 42,
       });
       const locD = await siteLocationModel.create({
         site_id: testSiteId,
@@ -152,6 +155,7 @@ describe('ZPL Routes', () => {
         suite: 'A',
         row: 'R1',
         rack: '04',
+        rack_size_u: 42,
       });
 
       const label2 = await labelModel.create({

@@ -147,7 +147,7 @@ const ProfileForm: React.FC<ProfileFormProps> = ({ user, onSuccess }) => {
               className="flex items-center"
             >
               {isLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-              Save Changes
+              {isDirty ? 'Save Changes' : 'No New Changes'}
             </Button>
             <Button
               type="button"

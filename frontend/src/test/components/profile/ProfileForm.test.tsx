@@ -61,7 +61,7 @@ describe('ProfileForm', () => {
     await user.clear(emailInput);
     await user.type(emailInput, 'invalid-email');
 
-    const submitButton = screen.getByText('Save Changes');
+    const submitButton = screen.getByRole('button', { name: 'Save Changes' });
     await user.click(submitButton);
 
     await waitFor(() => {
@@ -82,7 +82,7 @@ describe('ProfileForm', () => {
     await user.clear(emailInput);
     await user.type(emailInput, 'jane@example.com');
 
-    const submitButton = screen.getByText('Save Changes');
+    const submitButton = screen.getByRole('button', { name: 'Save Changes' });
     await user.click(submitButton);
 
     await waitFor(() => {
@@ -106,7 +106,7 @@ describe('ProfileForm', () => {
     await user.clear(emailInput);
     await user.type(emailInput, 'jane@example.com');
 
-    const submitButton = screen.getByText('Save Changes');
+    const submitButton = screen.getByRole('button', { name: 'Save Changes' });
     await user.click(submitButton);
 
     await waitFor(() => {
@@ -130,7 +130,7 @@ describe('ProfileForm', () => {
     await user.clear(emailInput);
     await user.type(emailInput, 'existing@example.com');
 
-    const submitButton = screen.getByText('Save Changes');
+    const submitButton = screen.getByRole('button', { name: 'Save Changes' });
     await user.click(submitButton);
 
     await waitFor(() => {
@@ -148,7 +148,7 @@ describe('ProfileForm', () => {
     await user.clear(emailInput);
     await user.type(emailInput, 'jane@example.com');
 
-    const submitButton = screen.getByText('Save Changes');
+    const submitButton = screen.getByRole('button', { name: 'Save Changes' });
     await user.click(submitButton);
 
     await waitFor(() => {
@@ -182,7 +182,7 @@ describe('ProfileForm', () => {
     await user.clear(emailInput);
     await user.type(emailInput, 'jane@example.com');
 
-    const submitButton = screen.getByText('Save Changes');
+    const submitButton = screen.getByRole('button', { name: 'Save Changes' });
     await user.click(submitButton);
 
     await waitFor(() => {
@@ -194,7 +194,7 @@ describe('ProfileForm', () => {
   it('should disable save button when no changes made', () => {
     render(<ProfileForm {...mockProps} />);
 
-    const submitButton = screen.getByText('Save Changes');
+    const submitButton = screen.getByRole('button', { name: 'No New Changes' });
     expect(submitButton).toBeDisabled();
   });
 
@@ -206,7 +206,7 @@ describe('ProfileForm', () => {
     await user.clear(emailInput);
     await user.type(emailInput, 'updated@example.com');
 
-    const submitButton = screen.getByText('Save Changes');
+    const submitButton = screen.getByRole('button', { name: 'Save Changes' });
     expect(submitButton).toBeEnabled();
   });
 });

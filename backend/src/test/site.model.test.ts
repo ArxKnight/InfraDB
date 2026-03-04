@@ -75,6 +75,23 @@ describe('Site Model', () => {
       expect(new Set(names)).toEqual(new Set(['100Mbps', '1Gbps', '2.5Gbps', '10Gbps', '25Gbps', '100Gbps']));
     });
 
+    it('seeds default SID types for a new site', async () => {
+      const site = await siteModel.create({
+        name: 'SID Type Site',
+        code: 'STS',
+        created_by: testUserId,
+      });
+
+      const rows = await db.query(
+        'SELECT name FROM sid_types WHERE site_id = ? ORDER BY name ASC',
+        [site.id]
+      );
+      const names = (rows as any[]).map((r: any) => String(r.name));
+
+      expect(names).toHaveLength(4);
+      expect(new Set(names)).toEqual(new Set(['Server', 'Switch', 'Access Point', 'Patch Panel']));
+    });
+
     it('seeds default NIC types for a new site', async () => {
       const site = await siteModel.create({
         name: 'NIC Type Site',

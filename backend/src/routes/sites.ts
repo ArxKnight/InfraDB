@@ -1520,7 +1520,7 @@ router.get(
             actorUserId: req.user!.userId,
             siteId,
             sidId,
-            action: 'SID_VIEWED',
+            action: 'SID_OPENED',
             summary: `Opened SID ${sid?.sid_number ?? sidId}${String(req.site?.name ?? '').trim() ? ` on ${String(req.site?.name ?? '').trim()}` : ''}`,
           });
         } catch {
@@ -1632,7 +1632,7 @@ router.get(
       );
 
       const excludedActions = new Set(['SID_VIEWED', 'SID_NOTE_ADDED', 'SID_NOTE_PINNED', 'SID_NOTE_UNPINNED', 'SID_CLOSING_NOTE']);
-      const keepWithoutChanges = new Set(['SID_CREATED', 'SID_DELETED']);
+      const keepWithoutChanges = new Set(['SID_CREATED', 'SID_DELETED', 'SID_OPENED']);
 
       const getChangesFromDiff = (diffJson: any): any[] => {
         if (!diffJson) return [];

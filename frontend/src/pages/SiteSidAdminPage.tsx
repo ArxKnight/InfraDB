@@ -81,6 +81,7 @@ const SiteSidAdminPage: React.FC = () => {
 
   const [editDialog, setEditDialog] = React.useState<null | PicklistKind>(null);
   const [editRowId, setEditRowId] = React.useState<number | null>(null);
+  const [editOriginalPayload, setEditOriginalPayload] = React.useState<Record<string, string | number | boolean | null> | null>(null);
   const [pendingUpdate, setPendingUpdate] = React.useState<null | { kind: PicklistKind; rowId: number; payload: any; usageCount: number }>(null);
   const [pendingDelete, setPendingDelete] = React.useState<null | { kind: PicklistKind; rowId: number; label: string; usageCount: number }>(null);
 
@@ -146,9 +147,126 @@ const SiteSidAdminPage: React.FC = () => {
     setOpError(null);
   };
 
+  const buildEditPayloadFromRow = (kind: PicklistKind, row: any): Record<string, string | number | boolean | null> => {
+    if (kind === 'sidType') {
+      return { name: String(row.name ?? '').trim() };
+    }
+    if (kind === 'deviceModel') {
+      return {
+        manufacturer: String(row.manufacturer ?? '').trim() || null,
+        name: String(row.name ?? '').trim(),
+        rack_u: row.rack_u != null ? String(row.rack_u).trim() : null,
+        is_switch: Boolean(row.is_switch),
+        default_switch_port_count: row.default_switch_port_count != null ? String(row.default_switch_port_count).trim() : null,
+        is_patch_panel: Boolean(row.is_patch_panel),
+        default_patch_panel_port_count: row.default_patch_panel_port_count != null ? String(row.default_patch_panel_port_count).trim() : null,
+      };
+    }
+    if (kind === 'cpuModel') {
+      return {
+        manufacturer: String(row.manufacturer ?? '').trim() || null,
+        name: String(row.name ?? '').trim(),
+        cpu_cores: row.cpu_cores != null ? String(row.cpu_cores).trim() : '',
+        cpu_threads: row.cpu_threads != null ? String(row.cpu_threads).trim() : '',
+      };
+    }
+    if (kind === 'platform') {
+      return { name: String(row.name ?? '').trim() };
+    }
+    if (kind === 'status') {
+      return { name: String(row.name ?? '').trim() };
+    }
+    if (kind === 'passwordType') {
+      return { name: String(row.name ?? '').trim() };
+    }
+    if (kind === 'vlan') {
+      return {
+        vlan_id: row.vlan_id != null ? String(row.vlan_id).trim() : '',
+        name: String(row.name ?? '').trim(),
+      };
+    }
+    if (kind === 'nicType') {
+      return { name: String(row.name ?? '').trim() };
+    }
+    return { name: String(row.name ?? '').trim() };
+  };
+
+  const buildCurrentEditPayload = React.useCallback(
+    (kind: PicklistKind): Record<string, string | number | boolean | null> => {
+      if (kind === 'sidType') {
+        return { name: editTypeName.trim() };
+      }
+      if (kind === 'deviceModel') {
+        return {
+          manufacturer: editDeviceManufacturer.trim() || null,
+          name: editDeviceName.trim(),
+          rack_u: editDeviceRackU.trim() === '' ? null : editDeviceRackU.trim(),
+          is_switch: editDeviceIsSwitch,
+          default_switch_port_count: editDeviceIsSwitch ? (editDeviceDefaultSwitchPortCount.trim() === '' ? null : editDeviceDefaultSwitchPortCount.trim()) : null,
+          is_patch_panel: editDeviceIsPatchPanel,
+          default_patch_panel_port_count: editDeviceIsPatchPanel ? (editDeviceDefaultPatchPanelPortCount.trim() === '' ? null : editDeviceDefaultPatchPanelPortCount.trim()) : null,
+        };
+      }
+      if (kind === 'cpuModel') {
+        return {
+          manufacturer: editCpuManufacturer.trim() || null,
+          name: editCpuName.trim(),
+          cpu_cores: editCpuCores.trim(),
+          cpu_threads: editCpuThreads.trim(),
+        };
+      }
+      if (kind === 'platform') {
+        return { name: editPlatformName.trim() };
+      }
+      if (kind === 'status') {
+        return { name: editStatusName.trim() };
+      }
+      if (kind === 'passwordType') {
+        return { name: editPasswordTypeName.trim() };
+      }
+      if (kind === 'vlan') {
+        return {
+          vlan_id: editVlanId.trim(),
+          name: editVlanName.trim(),
+        };
+      }
+      if (kind === 'nicType') {
+        return { name: editNicTypeName.trim() };
+      }
+      return { name: editNicSpeedName.trim() };
+    },
+    [
+      editCpuCores,
+      editCpuManufacturer,
+      editCpuName,
+      editCpuThreads,
+      editDeviceDefaultPatchPanelPortCount,
+      editDeviceDefaultSwitchPortCount,
+      editDeviceIsPatchPanel,
+      editDeviceIsSwitch,
+      editDeviceManufacturer,
+      editDeviceName,
+      editDeviceRackU,
+      editNicSpeedName,
+      editNicTypeName,
+      editPasswordTypeName,
+      editPlatformName,
+      editStatusName,
+      editTypeName,
+      editVlanId,
+      editVlanName,
+    ]
+  );
+
+  const hasEditChanges = React.useMemo(() => {
+    if (!editDialog || !editOriginalPayload) return true;
+    return JSON.stringify(buildCurrentEditPayload(editDialog)) !== JSON.stringify(editOriginalPayload);
+  }, [buildCurrentEditPayload, editDialog, editOriginalPayload]);
+
   const closeEditDialog = () => {
     setEditDialog(null);
     setEditRowId(null);
+    setEditOriginalPayload(null);
     setOpError(null);
   };
 
@@ -156,6 +274,7 @@ const SiteSidAdminPage: React.FC = () => {
     setOpError(null);
     setEditDialog(kind);
     setEditRowId(Number(row.id));
+    setEditOriginalPayload(buildEditPayloadFromRow(kind, row));
 
     if (kind === 'sidType') {
       setEditTypeName(String(row.name ?? ''));
@@ -1520,6 +1639,7 @@ const SiteSidAdminPage: React.FC = () => {
             <Button
               onClick={async () => {
                 if (!editDialog || !editRowId) return;
+                if (!hasEditChanges) return;
 
                 if (editDialog === 'sidType') {
                   const name = editTypeName.trim();
@@ -1631,9 +1751,9 @@ const SiteSidAdminPage: React.FC = () => {
                   await requestPicklistUpdate('nicSpeed', editRowId, { name });
                 }
               }}
-              disabled={!canAdmin || busy}
+              disabled={!canAdmin || busy || !hasEditChanges}
             >
-              Save Changes
+              {hasEditChanges ? 'Save Changes' : 'No New Changes'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1756,7 +1876,7 @@ const SiteSidAdminPage: React.FC = () => {
           {addDialog === 'deviceModel' && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="add-device-mfr">Manufacturer</Label>
+                <Label htmlFor="add-device-mfr">Device Manufacturer</Label>
                 <Input
                   id="add-device-mfr"
                   value={newDeviceManufacturer}
@@ -1766,7 +1886,7 @@ const SiteSidAdminPage: React.FC = () => {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="add-device-name">Name</Label>
+                <Label htmlFor="add-device-name">Device Model</Label>
                 <Input
                   id="add-device-name"
                   value={newDeviceName}

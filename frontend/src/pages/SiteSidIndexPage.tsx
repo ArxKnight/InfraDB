@@ -211,7 +211,7 @@ const SiteSidIndexPage: React.FC = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle>SID Index</CardTitle>
+          <CardTitle>SID Index Search</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
