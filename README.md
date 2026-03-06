@@ -17,11 +17,13 @@ It combines cable labeling, SID lifecycle management, location-aware inventory s
 - Multi-site management with per-user site memberships
 - Structured locations (`DATACENTRE` and `DOMESTIC` templates)
 - Location records support rack size (`Rack Size (U)`) and admin location tables display it
-- DOCX cable report export
+- Stock index for spare/unallocated hardware
+- DOCX exports: cable report, SID index report, cable trace report, visual rack elevation report
 
 ### Cable Platform
 - Cable label lifecycle with per-site sequential references
-- Cable type management per site
+- Cable type management per site (with usage checks before deletion)
+- Cable Admin page for managing cable types
 - Label create/edit form supports optional connected endpoints behind a toggle and validates endpoint fields only when enabled
 
 ### MAP Platform
@@ -29,18 +31,22 @@ It combines cable labeling, SID lifecycle management, location-aware inventory s
 - MAPIndex cable trace uses explicit actions (`Open Source SID`, `Open Destination SID`, optional patch panel SID buttons, and `Open Cable Ref#` deep-link)
 
 ### SID Platform
-- SID Index with search by status/SID/location/hostname/model
+- SID Index with search by status/SID/location/hostname/model/IP/CPU/power/switch name
 - SID detail pages for hardware/software/networking/location
-- SID notes, pinned notes, passwords, NICs, and IP addresses
-- SID admin picklists (types/models/platforms/statuses/password types/NIC types/NIC speeds/VLANs)
+- SID notes, pinned notes, passwords (per password-type), NICs, and IP addresses
+- SID admin picklists (types/device models/CPU models/platforms/statuses/password types/NIC types/NIC speeds/VLANs)
+- Device models support switch and patch panel designation with default port counts
 - Soft-delete SID model (`status = Deleted`) with read-only enforcement
 - Show/hide deleted SIDs in index (`show_deleted`)
 - Field-level SID history with granular diffs (including NIC/IP/password/note changes)
+- Activity logging for SID and site-level actions
 
 ### Admin + Security
 - JWT auth with refresh flow
 - Role- and site-scoped permissions
 - User invitations + invite acceptance
+- Admin-initiated password resets
+- Self-service password reset flow
 - App settings and SMTP test endpoint
 - Password hashing and validated API contracts (Zod)
 
@@ -55,18 +61,24 @@ It combines cable labeling, SID lifecycle management, location-aware inventory s
 - React Router protected app
 - Auth + memberships context
 - TanStack Query
-- Pages: sites, cable, SID index/detail/admin, stock, tools, profile, admin, setup
+- Pages: sites, cable, cable admin, SID index/detail/admin, stock, MAP index, tools, profile, admin, setup
 
 Key routes:
+- `/auth/login`
+- `/auth/register` (invite signup)
+- `/auth/reset-password`
 - `/sites`
 - `/sites/:siteId`
 - `/sites/:siteId/cable`
+- `/sites/:siteId/cable/admin`
 - `/sites/:siteId/sid`
 - `/sites/:siteId/sid/new`
 - `/sites/:siteId/sid/:sidId`
 - `/sites/:siteId/sid/admin`
 - `/sites/:siteId/stock`
+- `/sites/:siteId/mapindex`
 - `/tools`
+- `/profile`
 - `/admin`
 
 ### Backend (`backend/`)
@@ -77,6 +89,13 @@ API base: `/api`
 - `/api/sites`
 - `/api/labels`
 - `/api/setup`
+
+Key services:
+- `ActivityLogService` — site-level activity tracking
+- `SidActivityLogService` — SID-level change tracking
+- `RoleService` — role resolution and permission checks
+- `ZPLService` — ZPL label generation
+- `InvitationEmailService` — invitation email dispatch
 
 Runtime behavior:
 - Setup-gated API in non-test mode
@@ -152,6 +171,7 @@ This is a practical high-level map. For implementation details, see `backend/src
 
 ### Auth
 - `POST /api/auth/login`
+- `POST /api/auth/register`
 - `POST /api/auth/refresh`
 - `GET /api/auth/me`
 - `PUT /api/auth/profile`
@@ -176,6 +196,7 @@ This is a practical high-level map. For implementation details, see `backend/src
 
 ### Site cable types + report
 - `GET /api/sites/:id/cable-types`
+- `GET /api/sites/:id/cable-types/:cableTypeId/usage`
 - `POST /api/sites/:id/cable-types`
 - `PUT /api/sites/:id/cable-types/:cableTypeId`
 - `DELETE /api/sites/:id/cable-types/:cableTypeId`
@@ -201,6 +222,17 @@ This is a practical high-level map. For implementation details, see `backend/src
 - `GET /api/sites/:id/sids/:sidId/ip-addresses`
 - `PUT /api/sites/:id/sids/:sidId/ip-addresses`
 
+### Racks + MAP
+- `GET /api/sites/:id/racks`
+- `GET /api/sites/:id/racks/elevation`
+- `GET /api/sites/:id/cables/:cableRef/trace`
+
+### DOCX report downloads
+- `GET /api/sites/:id/cable-report`
+- `GET /api/sites/:id/sid-index-report`
+- `GET /api/sites/:id/cable-trace-report`
+- `GET /api/sites/:id/visual-rack-report`
+
 ### SID picklists (site-scoped)
 - `/api/sites/:id/sid/types`
 - `/api/sites/:id/sid/device-models`
@@ -212,7 +244,7 @@ This is a practical high-level map. For implementation details, see `backend/src
 - `/api/sites/:id/sid/nic-speeds`
 - `/api/sites/:id/sid/vlans`
 
-(Each supports list/create/update/delete and usage checks in current backend patterns.)
+Each supports `GET` (list), `POST` (create), `PUT /:rowId` (update), `DELETE /:rowId` (delete), and `GET /:rowId/usage` (usage check).
 
 ### Labels
 - `GET /api/labels`
@@ -239,7 +271,9 @@ This is a practical high-level map. For implementation details, see `backend/src
 - `GET /api/admin/validate-invite/:token`
 - `POST /api/admin/accept-invite`
 - `GET /api/admin/users`
+- `PUT /api/admin/users/:id`
 - `PUT /api/admin/users/:id/role`
+- `POST /api/admin/users/:id/password-reset`
 - `GET /api/admin/users/:id/sites`
 - `PUT /api/admin/users/:id/sites`
 - `DELETE /api/admin/users/:id`
@@ -247,6 +281,12 @@ This is a practical high-level map. For implementation details, see `backend/src
 - `PUT /api/admin/settings`
 - `POST /api/admin/settings/test-email`
 - `GET /api/admin/stats`
+
+### Users
+- `GET /api/users`
+- `GET /api/users/stats`
+- `PUT /api/users/:id`
+- `DELETE /api/users/:id`
 
 ---
 
@@ -258,6 +298,9 @@ This is a practical high-level map. For implementation details, see `backend/src
 - React Router
 - TanStack Query
 - React Hook Form + Zod
+- Lucide React icons
+- Sonner (toast notifications)
+- QRCode generation
 - Vitest + Testing Library
 
 ### Backend
@@ -268,6 +311,7 @@ This is a practical high-level map. For implementation details, see `backend/src
 - Zod
 - Helmet, CORS, Morgan
 - Nodemailer
+- `docx` (Word document generation for reports)
 
 ---
 
